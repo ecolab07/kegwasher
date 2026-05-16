@@ -87,58 +87,50 @@ step_t STEPS_FILL_CLEANER[] = {
 };
 
 
-// 579sec (9min39)
+// 325sec (5min25)
 // https://www.btobeer.com/themes-conseils-techniques-bieres-brasseries/conseils-carbonatation-process-et-analyses/futs-de-biere-a-plongeurs-incorpores-problemes-lies-au-lavage-et-sterilisation-des-futs
 step_t STEPS_WASH_KEG[] = {
-  // 25sec
-  {CONFIG_DRAIN, 25},
-  // 103sec (1min43)
+  // ===== Drain initial =====
+  {CONFIG_DRAIN, 15},
+
+  // ===== Rinçage initial =====
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
+
+  // ===== Détergent =====
+  {CONFIG_CLEAN, 10},
+  {CONFIG_CLEAN_PURGE, 15},
+
+  {CONFIG_CLEAN, 10},
+  {CONFIG_CLEAN_PURGE, 15},
+
+  {CONFIG_CLEAN, 10},
+  {CONFIG_CLEAN_PURGE, 20},
+
+  // ===== Rinçage intermédiaire =====
   {CONFIG_RINCE, 3},
   {CONFIG_RINCE_PURGE, 10},
-  {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 20},
-  {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 20},
-  // 203sec (3min23)
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 3},
-  {CONFIG_CLEAN_PURGE, 5},
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 20},
-  {CONFIG_CLEAN_PURGE, 25},
-  {CONFIG_CLEAN, 20},
-  {CONFIG_CLEAN_PURGE, 30},
-  // 90sec (1min30)
-  {CONFIG_RINCE, 3},
-  {CONFIG_RINCE_PURGE, 10},
+
   {CONFIG_RINCE, 7},
   {CONFIG_RINCE_PURGE, 10},
+
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-  {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 20},
-  // 113sec (1min53)
+
+  // ===== Désinfection  =====
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
+
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-  {CONFIG_SANITIZE, 10},
-  {CONFIG_SANITIZE_PURGE, 15},
-  {CONFIG_SANITIZE, 3},
-  {CONFIG_SANITIZE_PURGE, 5},
-  {CONFIG_SANITIZE, 10},
+
+  {CONFIG_SANITIZE, 30},
   {CONFIG_SANITIZE_PURGE, 20},
-  // 45sec
-  {CONFIG_RINCE, 15},
+
+  // ===== Rinçage final + purge air =====
+  {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 30},
+
   {CONFIG_END, 0}
 };
 
