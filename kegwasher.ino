@@ -179,59 +179,50 @@ step_t STEPS_DETER_KEG[] = {
   {CONFIG_END, 0}
 };
 
-// 569sec (9min29)
+// 335sec (5min35)
 step_t STEPS_WASH_KEG_PRESSURIZE[] = {
-  // 25sec
-  {CONFIG_DRAIN, 25},
-  // 103sec (1min43)
+  // ===== Drain initial =====
+  {CONFIG_DRAIN, 15},
+
+  // ===== Rinçage initial =====
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
+
+  // ===== Détergent =====
+  {CONFIG_CLEAN, 10},
+  {CONFIG_CLEAN_PURGE, 15},
+
+  {CONFIG_CLEAN, 10},
+  {CONFIG_CLEAN_PURGE, 15},
+
+  {CONFIG_CLEAN, 10},
+  {CONFIG_CLEAN_PURGE, 20},
+
+  // ===== Rinçage intermédiaire =====
   {CONFIG_RINCE, 3},
   {CONFIG_RINCE_PURGE, 10},
-  {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 20},
-  {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 20},
-  // 203sec (3min23)
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 3},
-  {CONFIG_CLEAN_PURGE, 5},
-  {CONFIG_CLEAN, 10},
-  {CONFIG_CLEAN_PURGE, 15},
-  {CONFIG_CLEAN, 20},
-  {CONFIG_CLEAN_PURGE, 25},
-  {CONFIG_CLEAN, 20},
-  {CONFIG_CLEAN_PURGE, 30},
-  // 90sec (1min30)
-  {CONFIG_RINCE, 3},
-  {CONFIG_RINCE_PURGE, 10},
+
   {CONFIG_RINCE, 7},
   {CONFIG_RINCE_PURGE, 10},
+
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-  {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 20},
-  // 113sec (1min53)
+
+  // ===== Désinfection  =====
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
+
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-  {CONFIG_SANITIZE, 10},
-  {CONFIG_SANITIZE_PURGE, 15},
-  {CONFIG_SANITIZE, 3},
-  {CONFIG_SANITIZE_PURGE, 5},
-  {CONFIG_SANITIZE, 10},
+
+  {CONFIG_SANITIZE, 30},
   {CONFIG_SANITIZE_PURGE, 20},
-  // 25sec
-  {CONFIG_RINCE, 15},
-  {CONFIG_RINCE_PURGE_CO2, 10},
-  // 10sec
+
+  // ===== Rinçage final + purge CO₂ + mise sous pression =====
+  {CONFIG_RINCE, 10},
+  {CONFIG_RINCE_PURGE_CO2, 30},
   {CONFIG_CO2, 10},
+
   {CONFIG_END, 0}
 };
 
