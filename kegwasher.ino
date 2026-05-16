@@ -283,11 +283,11 @@ step_t STEPS_DRAIN_KEG[] = {
 };
 
 mode_t MODES[] = {
-  {"Lavage CO2", STEPS_WASH_KEG_PRESSURIZE},
-  {"Lavage NO co2", STEPS_WASH_KEG},
-  {"Deter uniq.", STEPS_DETER_KEG},
+  {"Lavage + CO2", STEPS_WASH_KEG_PRESSURIZE},
+  {"Lavage sans CO2", STEPS_WASH_KEG},
+  {"Detergent seul", STEPS_DETER_KEG},
   {"CO2", STEPS_KEG_PRESSURIZE},
-  {"Desinf. CO2", STEPS_SANITIZE_KEG_PRESSURIZE},
+  {"Desinf. + CO2", STEPS_SANITIZE_KEG_PRESSURIZE},
   {"Vidange fut", STEPS_DRAIN_KEG},
   {"Vidange desinf.", STEPS_DRAIN_SANITIZER},
   {"Vidange deter.", STEPS_DRAIN_CLEANER},
