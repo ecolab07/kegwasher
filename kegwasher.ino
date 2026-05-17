@@ -325,7 +325,9 @@ void select_update()
 
   menuselect.tick();
   pos = menuselect.getPosition();
-  new_mode = pos % MODES_NUMBER;
+
+  // prevent negative menu value
+  new_mode = (pos + MODES_NUMBER) % MODES_NUMBER;
 
   if( new_mode != mode ) {
     mode = new_mode;
