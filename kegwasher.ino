@@ -635,7 +635,7 @@ void setup()
   buttonAction.attach(PIN_BUTTON_ACTION);
   buttonAction.interval(10);
 
-  lcd.begin();
+  lcd.init();
   lcd.backlight();
   lcd.createChar(CHAR_UP_DOWN, CHAR_UP_DOWN_SETUP);
 
