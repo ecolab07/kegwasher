@@ -239,9 +239,9 @@ step_t STEPS_KEG_PRESSURIZE[] = {
   // 10sec
   {CONFIG_DRAIN, 10},
   // 10sec
-  {CONFIG_RINCE_PURGE_CO2, 10},
+  {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
   // 20sec
-  {CONFIG_CO2, 20},
+  {CONFIG_CO2, 10}, // Adjust if needed
   {CONFIG_END, 0}
 };
 
