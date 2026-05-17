@@ -66,32 +66,35 @@ typedef struct mode_s {
   step_t *steps;
 } mode_t;
 
+// 200s (3min20)
 step_t STEPS_DRAIN_SANITIZER[] = {
   {CONFIG_DRAIN_SANITIZER, 200},
   {CONFIG_END, 0}
 };
 
+// 200s (3min20)
 step_t STEPS_DRAIN_CLEANER[] = {
   {CONFIG_DRAIN_CLEANER, 200},
   {CONFIG_END, 0}
 };
 
+// 120s (2min00)
 step_t STEPS_FILL_SANITIZER[] = {
   {CONFIG_FILL_SANITIZER, 120},
   {CONFIG_END, 0}
 };
 
+// 120s (2min00)
 step_t STEPS_FILL_CLEANER[] = {
   {CONFIG_FILL_CLEANER, 120},
   {CONFIG_END, 0}
 };
 
-
-// 325sec (5min25)
+// 325s (5min25)
 // https://www.btobeer.com/themes-conseils-techniques-bieres-brasseries/conseils-carbonatation-process-et-analyses/futs-de-biere-a-plongeurs-incorpores-problemes-lies-au-lavage-et-sterilisation-des-futs
 step_t STEPS_WASH_KEG[] = {
   // ===== Drain initial =====
-  {CONFIG_DRAIN, 15},
+  {CONFIG_DRAIN, 10}, // Adjust if needed
 
   // ===== Rinçage initial =====
   {CONFIG_RINCE, 10},
@@ -100,43 +103,37 @@ step_t STEPS_WASH_KEG[] = {
   // ===== Détergent =====
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
-
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
-
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 20},
 
   // ===== Rinçage intermédiaire =====
   {CONFIG_RINCE, 3},
   {CONFIG_RINCE_PURGE, 10},
-
   {CONFIG_RINCE, 7},
   {CONFIG_RINCE_PURGE, 10},
-
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
 
   // ===== Désinfection  =====
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-
-  {CONFIG_SANITIZE, 30},
+  {CONFIG_SANITIZE, 30}, // Adjust if needed
   {CONFIG_SANITIZE_PURGE, 20},
 
   // ===== Rinçage final + purge air =====
   {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 30},
+  {CONFIG_RINCE_PURGE, 30}, // Adjust if needed
 
   {CONFIG_END, 0}
 };
 
-// 185sec (3min05)
+// 185s (3min05)
 step_t STEPS_DETER_KEG[] = {
-  {CONFIG_DRAIN, 15}, // Adjust if needed
+  {CONFIG_DRAIN, 10}, // Adjust if needed
 
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
@@ -157,10 +154,10 @@ step_t STEPS_DETER_KEG[] = {
   {CONFIG_END, 0}
 };
 
-// 335sec (5min35)
+// 335s (5min35)
 step_t STEPS_WASH_KEG_PRESSURIZE[] = {
   // ===== Drain initial =====
-  {CONFIG_DRAIN, 15},
+  {CONFIG_DRAIN, 10}, // Adjust if needed
 
   // ===== Rinçage initial =====
   {CONFIG_RINCE, 10},
@@ -193,18 +190,18 @@ step_t STEPS_WASH_KEG_PRESSURIZE[] = {
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
 
-  {CONFIG_SANITIZE, 30},
+  {CONFIG_SANITIZE, 30}, // Adjust if needed
   {CONFIG_SANITIZE_PURGE, 20},
 
   // ===== Rinçage final + purge CO₂ + mise sous pression =====
   {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE_CO2, 30},
-  {CONFIG_CO2, 10},
+  {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
+  {CONFIG_CO2, 10}, // Adjust if needed
 
   {CONFIG_END, 0}
 };
 
-// 190sec (3min10)
+// 190s (3min10)
 step_t STEPS_SANITIZE_KEG_PRESSURIZE[] = {
   {CONFIG_DRAIN, 10}, // Adjust if needed
 
@@ -221,23 +218,21 @@ step_t STEPS_SANITIZE_KEG_PRESSURIZE[] = {
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
 
-  {CONFIG_CO2, 10},
-  {CONFIG_END, 0}
-};
-
-// 40sec
-step_t STEPS_KEG_PRESSURIZE[] = {
-  // 10sec
-  {CONFIG_DRAIN, 10},
-  // 10sec
-  {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
-  // 20sec
   {CONFIG_CO2, 10}, // Adjust if needed
   {CONFIG_END, 0}
 };
 
+// 40s
+step_t STEPS_KEG_PRESSURIZE[] = {
+  {CONFIG_DRAIN, 10}, // Adjust if needed
+  {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
+  {CONFIG_CO2, 10}, // Adjust if needed
+  {CONFIG_END, 0}
+};
+
+// 70s (1min10)
 step_t STEPS_DRAIN_KEG[] = {
-  {CONFIG_DRAIN, 10},
+  {CONFIG_DRAIN, 10}, // Adjust if needed
   {CONFIG_RINCE_PURGE, 60},
   {CONFIG_END, 0}
 };
