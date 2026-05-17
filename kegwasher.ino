@@ -326,7 +326,7 @@ void select_update()
   menuselect.tick();
   pos = menuselect.getPosition();
 
-  // prevent negative menu value
+  // Prevent negative menu value
   new_mode = (pos + MODES_NUMBER) % MODES_NUMBER;
 
   if( new_mode != mode ) {
@@ -602,6 +602,18 @@ void cancel()
 
 void setup()
 {
+  // Preload pins to HIGH to prevent the brief glitch where a pin momentarily goes OUTPUT LOW before being driven HIGH
+  // Prevent startup inrush current caused by multiple relays briefly activating at power-up
+  digitalWrite(PIN_VALVE_AIR, HIGH);
+  digitalWrite(PIN_VALVE_CO2, HIGH);
+  digitalWrite(PIN_VALVE_WATER, HIGH);
+  digitalWrite(PIN_VALVE_CLEANER_IN, HIGH);
+  digitalWrite(PIN_VALVE_SANITIZER_IN, HIGH);
+  digitalWrite(PIN_VALVE_CLEANER_OUT, HIGH);
+  digitalWrite(PIN_VALVE_SANITIZER_OUT, HIGH);
+  digitalWrite(PIN_VALVE_DRAIN, HIGH);
+  digitalWrite(PIN_PUMP, HIGH);
+
   pinMode(PIN_BUTTON_ACTION, INPUT_PULLUP);
   pinMode(PIN_VALVE_AIR, OUTPUT);
   pinMode(PIN_VALVE_CO2, OUTPUT);
@@ -615,7 +627,8 @@ void setup()
   pinMode(PIN_PUMP, OUTPUT);
   pinMode(PIN_BUZZER, OUTPUT);
 
-  controls_set(0);
+  delay(100);
+
   digitalWrite(PIN_LED, LOW);
   digitalWrite(PIN_BUZZER, LOW);
 
