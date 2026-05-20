@@ -36,6 +36,11 @@
 #define CTRL_SANITIZER_OUT  0b010000000
 #define CTRL_PUMP           0b100000000
 
+// WARNING before test mode STEPS_TEST_VALVES (10th bit)
+#define CONFIG_WARNING  0b1000000000
+// Waiting time in the test mode (11th bit)
+#define CONFIG_WAIT     0b10000000000
+
 #define CONFIG_DRAIN            (CTRL_DRAIN)
 #define CONFIG_DRAIN_SANITIZER  (CTRL_PUMP + CTRL_SANITIZER_IN + CTRL_DRAIN)
 #define CONFIG_DRAIN_CLEANER    (CTRL_PUMP + CTRL_CLEANER_IN + CTRL_DRAIN)
@@ -237,6 +242,34 @@ step_t STEPS_DRAIN_KEG[] = {
   {CONFIG_END, 0}
 };
 
+// 22s
+// Valves sound test form left to right and up to down
+step_t STEPS_TEST_ACTUATORS[] = {
+    {CONFIG_WARNING, 3},
+    {CONFIG_WAIT, 1},
+
+    {CTRL_SANITIZER_OUT, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_DRAIN, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_CLEANER_OUT, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_AIR, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_CO2, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_SANITIZER_IN, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_WATER, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_CLEANER_IN, 1},
+    {CONFIG_WAIT, 1},
+    {CTRL_PUMP, 1},
+    {CONFIG_WAIT, 1},
+
+    {CONFIG_END, 0}
+};
+
 mode_t MODES[] = {
   {"Lavage + CO2", STEPS_WASH_KEG_PRESSURIZE},
   {"Lavage sans CO2", STEPS_WASH_KEG},
@@ -248,6 +281,7 @@ mode_t MODES[] = {
   {"Vidange deter.", STEPS_DRAIN_CLEANER},
   {"Rempl. desinf.", STEPS_FILL_SANITIZER},
   {"Rempl. deter.", STEPS_FILL_CLEANER},
+  {"Test vannes", STEPS_TEST_ACTUATORS},
 };
 
 int MODES_NUMBER = sizeof(MODES) / sizeof(mode_t);
@@ -388,6 +422,39 @@ void controls_set_state(unsigned int config, int state, int delay_time)
     case CONFIG_CO2:
       config_label = "CO2";
       break;
+    case CTRL_WATER:
+        config_label = "Eau";
+        break;
+    case CTRL_CLEANER_IN:
+        config_label = "Deter. IN";
+        break;
+    case CTRL_SANITIZER_IN:
+        config_label = "Desinf. IN";
+        break;
+    case CTRL_AIR:
+        config_label = "Air";
+        break;
+    case CTRL_CO2:
+        config_label = "CO2";
+        break;
+    case CTRL_DRAIN:
+        config_label = "Egout";
+        break;
+    case CTRL_CLEANER_OUT:
+        config_label = "Deterg. OUT";
+        break;
+    case CTRL_SANITIZER_OUT:
+        config_label = "Desinf. OUT";
+        break;
+    case CTRL_PUMP:
+        config_label = "Pompe";
+        break;
+    case CONFIG_WARNING:
+        config_label = "Cuves vides ?";
+        break;
+    case CONFIG_WAIT:
+        config_label = "Attente...";
+        break;
     default:
       config_label = "";
       break;
