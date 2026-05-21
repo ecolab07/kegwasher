@@ -362,8 +362,6 @@ int mode_full_time;       // Total duration of the current mode in seconds
 int step;                 // Index of the current step within the mode
 int step_start_time;      // Timestamp when the current step started
 
-const char *config_label; // Short label for the active valve configuration (shown on LCD)
-
 // ============================================================
 // Helpers
 // ============================================================
@@ -438,192 +436,92 @@ void select_update()
 //
 // Opening and closing are done in opposite orders to prevent pressure
 // damage and chemical cross-contamination when delay_time > 0.
-void controls_set_state(unsigned int config, int state, int delay_time)
-{
-  // Resolve a human-readable label for the active configuration (used on LCD)
-  switch(config) {
-    case CONFIG_DRAIN:
-      config_label = "Vidange";
-      break;
-    case CONFIG_DRAIN_SANITIZER:
-      config_label = "Vidange desinf.";
-      break;
-    case CONFIG_DRAIN_CLEANER:
-      config_label = "Vidange deter.";
-      break;
-    case CONFIG_FILL_SANITIZER:
-      config_label = "Rempl. desinf.";
-      break;
-    case CONFIG_FILL_CLEANER:
-      config_label = "Rempl. deter.";
-      break;
-    case CONFIG_RINCE:
-      config_label = "Rincage";
-      break;
-    case CONFIG_RINCE_PURGE:
-      config_label = "Purge air";
-      break;
-    case CONFIG_RINCE_PURGE_CO2:
-      config_label = "Purge CO2";
-      break;
-    case CONFIG_CLEAN:
-      config_label = "Detergent";
-      break;
-    case CONFIG_CLEAN_PURGE:
-      config_label = "Purge deter.";
-      break;
-    case CONFIG_SANITIZE:
-      config_label = "Desinfectant";
-      break;
-    case CONFIG_SANITIZE_PURGE:
-      config_label = "Purge desinf.";
-      break;
-    case CONFIG_CO2:
-      config_label = "CO2";
-      break;
-    // Individual actuator labels — used only by the test mode sequence
-    case CTRL_WATER:
-        config_label = "Eau";
-        break;
-    case CTRL_CLEANER_IN:
-        config_label = "Deter. IN";
-        break;
-    case CTRL_SANITIZER_IN:
-        config_label = "Desinf. IN";
-        break;
-    case CTRL_AIR:
-        config_label = "Air";
-        break;
-    case CTRL_CO2:
-        config_label = "CO2";
-        break;
-    case CTRL_DRAIN:
-        config_label = "Egout";
-        break;
-    case CTRL_CLEANER_OUT:
-        config_label = "Deterg. OUT";
-        break;
-    case CTRL_SANITIZER_OUT:
-        config_label = "Desinf. OUT";
-        break;
-    case CTRL_PUMP:
-        config_label = "Pompe";
-        break;
-    case CONFIG_WARNING:
-        config_label = "Cuves vides ?";  // Safety prompt: confirm tanks are empty
-        break;
-    case CONFIG_WAIT:
-        config_label = "Attente...";     // All outputs off between test pulses
-        break;
-    default:
-      config_label = "";
-      break;
-  }
 
+
+// Returns a human-readable label for the given valve configuration.
+const char* resolve_label(unsigned int config)
+{
+  switch(config) {
+    case CONFIG_DRAIN:          return "Vidange";
+    case CONFIG_DRAIN_SANITIZER:return "Vidange desinf.";
+    case CONFIG_DRAIN_CLEANER:  return "Vidange deter.";
+    case CONFIG_FILL_SANITIZER: return "Rempl. desinf.";
+    case CONFIG_FILL_CLEANER:   return "Rempl. deter.";
+    case CONFIG_RINCE:          return "Rincage";
+    case CONFIG_RINCE_PURGE:    return "Purge air";
+    case CONFIG_RINCE_PURGE_CO2:return "Purge CO2";
+    case CONFIG_CLEAN:          return "Detergent";
+    case CONFIG_CLEAN_PURGE:    return "Purge deter.";
+    case CONFIG_SANITIZE:       return "Desinfectant";
+    case CONFIG_SANITIZE_PURGE: return "Purge desinf.";
+    case CONFIG_CO2:            return "CO2";
+    case CTRL_WATER:            return "Eau";
+    case CTRL_CLEANER_IN:       return "Deter. IN";
+    case CTRL_SANITIZER_IN:     return "Desinf. IN";
+    case CTRL_AIR:              return "Air";
+    case CTRL_CO2:              return "CO2";
+    case CTRL_DRAIN:            return "Egout";
+    case CTRL_CLEANER_OUT:      return "Deterg. OUT";
+    case CTRL_SANITIZER_OUT:    return "Desinf. OUT";
+    case CTRL_PUMP:             return "Pompe";
+    case CONFIG_WARNING:        return "Cuves vides ?";
+    case CONFIG_WAIT:           return "Attente...";
+    default:                    return "";
+  }
+}
+
+// Closes the actuators in the given bitmask, in safe order.
+void close_actuators(unsigned int config)
+{
   // Closing order: stop pressurised sources first, then outputs.
   // This prevents pressure from being trapped in the circuit.
-  if (state == VALVE_CLOSE) {
-    // First stop pump and all pressurised inputs
-    if(config & CTRL_PUMP) {
-      digitalWrite(PIN_PUMP, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_WATER) {
-      digitalWrite(PIN_VALVE_WATER, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_CO2) {
-      digitalWrite(PIN_VALVE_CO2, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_AIR) {
-      digitalWrite(PIN_VALVE_AIR, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_CLEANER_IN) {
-      digitalWrite(PIN_VALVE_CLEANER_IN, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_SANITIZER_IN) {
-      digitalWrite(PIN_VALVE_SANITIZER_IN, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_CLEANER_OUT) {
-      digitalWrite(PIN_VALVE_CLEANER_OUT, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_SANITIZER_OUT) {
-      digitalWrite(PIN_VALVE_SANITIZER_OUT, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_DRAIN) {
-      digitalWrite(PIN_VALVE_DRAIN, state);
-      delay(delay_time);
-    }
-  }
-  else {
-    // Opening order: outputs first, then inputs, then pump.
-    // Ensures the circuit has a clear path before any pressure is applied.
+  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,              VALVE_CLOSE); delay(200); }
+  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,       VALVE_CLOSE); delay(200); }
+  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,         VALVE_CLOSE); delay(200); }
+  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,         VALVE_CLOSE); delay(200); }
+  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,  VALVE_CLOSE); delay(200); }
+  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN,VALVE_CLOSE); delay(200); }
+  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT, VALVE_CLOSE); delay(200); }
+  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_CLOSE);delay(200); }
+  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,       VALVE_CLOSE); delay(200); }
+}
 
-    // Open drain and return valves first
-    if(config & CTRL_DRAIN) {
-      digitalWrite(PIN_VALVE_DRAIN, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_CLEANER_OUT) {
-      digitalWrite(PIN_VALVE_CLEANER_OUT, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_SANITIZER_OUT) {
-      digitalWrite(PIN_VALVE_SANITIZER_OUT, state);
-      delay(delay_time);
-    }
-
-    // Then unpressurised liquid inputs
-    if(config & CTRL_CLEANER_IN) {
-      digitalWrite(PIN_VALVE_CLEANER_IN, state);
-      delay(delay_time);
-    }
-    if(config & CTRL_SANITIZER_IN) {
-      digitalWrite(PIN_VALVE_SANITIZER_IN, state);
-      delay(delay_time);
-    }
-
-    // Start pump — draws liquid through the input channels, reducing inlet pressure
-    if(config & CTRL_PUMP) {
-      digitalWrite(PIN_PUMP, state);
-      delay(delay_time);
-    }
-
-    // Air is pressure-neutral, safe to open at this point
-    if(config & CTRL_AIR) {
-      digitalWrite(PIN_VALVE_AIR, state);
-      delay(delay_time);
-    }
-    // CO2 next
-    if(config & CTRL_CO2) {
-      digitalWrite(PIN_VALVE_CO2, state);
-      delay(delay_time);
-    }
-    // Water last: the pump pressure prevents water from back-flowing into liquid tanks
-    if(config & CTRL_WATER) {
-      digitalWrite(PIN_VALVE_WATER, state);
-      delay(delay_time);
-    }
-  }
+// Opens the actuators in the given bitmask, in safe order.
+void open_actuators(unsigned int config)
+{
+  // Opening order: outputs first, then inputs, then pump.
+  // Ensures the circuit has a clear path before any pressure is applied.
+  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,        VALVE_OPEN); delay(200); }
+  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT,  VALVE_OPEN); delay(200); }
+  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_OPEN); delay(200); }
+  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,   VALVE_OPEN); delay(200); }
+  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN, VALVE_OPEN); delay(200); }
+  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,               VALVE_OPEN); delay(200); }
+  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,          VALVE_OPEN); delay(200); }
+  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,          VALVE_OPEN); delay(200); }
+  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,        VALVE_OPEN); delay(200); }
 }
 
 // Transition to a new valve configuration:
 // first close everything that is not needed, then open what is needed.
 // A 200 ms delay between each actuator change limits inrush current
 // from multiple relays switching simultaneously.
+
+// Tracks the previously active configuration to compute minimal transitions.
+unsigned int previous_config = 0;
+
 void controls_set(unsigned int config)
 {
+  unsigned int to_close = previous_config & ~config;
+  unsigned int to_open  = config & ~previous_config;
+
   // Close all actuators not required by the new configuration
-  controls_set_state(~config, VALVE_CLOSE, 200);
+  close_actuators(to_close);
 
   // Open all actuators required by the new configuration
-  controls_set_state(config, VALVE_OPEN, 200);
+  open_actuators(to_open);
+
+  previous_config = config;
 }
 
 // Activate the step at the given index: record its start time,
@@ -702,7 +600,7 @@ void run_update()
   if( mode_running_time % LED_BLINK_PERIOD < LED_BLINK_PERIOD/2 ) {
     digitalWrite(PIN_LED, HIGH);
     lcd.setCursor(0, 0);
-    lcd_printf(config_label);
+    lcd_printf(resolve_label(MODES[mode].steps[step].config));
   }
   else {
     digitalWrite(PIN_LED, LOW);
