@@ -274,13 +274,13 @@ step_t STEPS_TEST_ACTUATORS[] = {
 
     {CTRL_SANITIZER_OUT, 1},  // Sanitizer return valve
     {CONFIG_WAIT,        1},
-    {CTRL_DRAIN,         1},  // Drain valve
+    {CONFIG_DRAIN,         1},  // Drain valve
     {CONFIG_WAIT,        1},
     {CTRL_CLEANER_OUT,   1},  // Cleaner return valve
     {CONFIG_WAIT,        1},
     {CTRL_AIR,           1},  // Air inlet valve
     {CONFIG_WAIT,        1},
-    {CTRL_CO2,           1},  // CO2 inlet valve
+    {CONFIG_CO2,           1},  // CO2 inlet valve
     {CONFIG_WAIT,        1},
     {CTRL_SANITIZER_IN,  1},  // Sanitizer feed valve
     {CONFIG_WAIT,        1},
@@ -459,8 +459,6 @@ const char* resolve_label(unsigned int config)
     case CTRL_CLEANER_IN:       return "Deter. IN";
     case CTRL_SANITIZER_IN:     return "Desinf. IN";
     case CTRL_AIR:              return "Air";
-    case CTRL_CO2:              return "CO2";
-    case CTRL_DRAIN:            return "Egout";
     case CTRL_CLEANER_OUT:      return "Deterg. OUT";
     case CTRL_SANITIZER_OUT:    return "Desinf. OUT";
     case CTRL_PUMP:             return "Pompe";
