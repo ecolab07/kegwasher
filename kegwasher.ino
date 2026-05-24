@@ -43,7 +43,7 @@
 #define CTRL_PUMP           0b100000000
 
 // Extended flags used by the test mode only (bits 10 and 11,
-// outside the range of real actuator bits)
+// outside the range of real actuator bits — no physical output is triggered).
 #define CONFIG_WARNING  0b1000000000   // Prompt operator before firing any actuator (bit 10)
 #define CONFIG_WAIT     0b10000000000  // Idle gap between individual actuator pulses (bit 11)
 
@@ -68,6 +68,9 @@
 // LED blink period in seconds during a running sequence
 #define LED_BLINK_PERIOD    2
 
+// Inter-actuator delay in milliseconds (limits relay inrush current spikes)
+#define ACTUATOR_DELAY_MS   200
+
 // Relay logic: relays are active-low
 #define VALVE_CLOSE HIGH
 #define VALVE_OPEN  LOW
@@ -78,8 +81,8 @@
 
 // One step in a wash sequence: a valve configuration and its duration in seconds
 typedef struct step_s {
-  unsigned int config;
-  int duration;
+  unsigned int  config;
+  unsigned long duration;
 } step_t;
 
 // A named wash mode and its associated step array
@@ -263,7 +266,7 @@ step_t STEPS_DRAIN_KEG[] = {
   {CONFIG_END, 0}
 };
 
-// Actuator click-test — 22 s total.
+// Actuator click-test.
 // Fires each valve and the pump individually, one at a time,
 // in relay-board order (left to right, top to bottom),
 // with a 1 s idle gap between each pulse.
@@ -274,13 +277,13 @@ step_t STEPS_TEST_ACTUATORS[] = {
 
     {CTRL_SANITIZER_OUT, 1},  // Sanitizer return valve
     {CONFIG_WAIT,        1},
-    {CONFIG_DRAIN,         1},  // Drain valve
+    {CONFIG_DRAIN,       1},  // Drain valve
     {CONFIG_WAIT,        1},
     {CTRL_CLEANER_OUT,   1},  // Cleaner return valve
     {CONFIG_WAIT,        1},
     {CTRL_AIR,           1},  // Air inlet valve
     {CONFIG_WAIT,        1},
-    {CONFIG_CO2,           1},  // CO2 inlet valve
+    {CONFIG_CO2,         1},  // CO2 inlet valve
     {CONFIG_WAIT,        1},
     {CTRL_SANITIZER_IN,  1},  // Sanitizer feed valve
     {CONFIG_WAIT,        1},
@@ -312,7 +315,7 @@ mode_t MODES[] = {
 };
 
 // Computed at runtime so new modes added above are counted automatically
-int MODES_NUMBER = sizeof(MODES) / sizeof(mode_t);
+const int MODES_NUMBER = sizeof(MODES) / sizeof(mode_t);
 
 // ============================================================
 // Hardware objects
@@ -355,16 +358,22 @@ state_t state = STATE_SELECT;
 // ============================================================
 // Global runtime variables
 // ============================================================
-int mode = 0;             // Index of the currently selected mode
-int mode_start_time;      // millis()-based timestamp when the mode started
-int mode_full_time;       // Total duration of the current mode in seconds
+int           mode = 0;          // Index of the currently selected mode
+unsigned long mode_start_time;   // Timestamp (ms) when the mode started
+unsigned long mode_full_time;    // Total duration of the current mode in seconds
 
-int step;                 // Index of the current step within the mode
-int step_start_time;      // Timestamp when the current step started
+int           step;              // Index of the current step within the mode
+unsigned long step_start_time;   // Timestamp (ms) when the current step started
 
 // ============================================================
 // Helpers
 // ============================================================
+
+// Returns the current time in whole seconds.
+unsigned long seconds()
+{
+  return millis() / 1000;
+}
 
 // Printf-style wrapper for the LCD: formats into a 16-character
 // left-justified string and prints it at the current cursor position.
@@ -373,18 +382,101 @@ void lcd_printf(const char *fmt, ...)
   char buf1[17];
   va_list args;
   va_start(args, fmt);
-  vsnprintf(buf1, sizeof(buf1)-1, fmt, args);
+  vsnprintf(buf1, sizeof(buf1), fmt, args);
   va_end(args);
 
   char buf2[17];
-  snprintf(buf2, sizeof(buf2)-1, "%-16s", buf1);
+  snprintf(buf2, sizeof(buf2), "%-16s", buf1);
   lcd.print(buf2);
 }
 
-// Returns the current time in whole seconds.
-int seconds()
+// Returns a human-readable label for the given valve configuration.
+const char* resolve_label(unsigned int config)
 {
-  return millis() / 1000;
+  switch(config) {
+    case CONFIG_DRAIN:           return "Vidange";
+    case CONFIG_DRAIN_SANITIZER: return "Vidange desinf.";
+    case CONFIG_DRAIN_CLEANER:   return "Vidange deter.";
+    case CONFIG_FILL_SANITIZER:  return "Rempl. desinf.";
+    case CONFIG_FILL_CLEANER:    return "Rempl. deter.";
+    case CONFIG_RINCE:           return "Rincage";
+    case CONFIG_RINCE_PURGE:     return "Purge air";
+    case CONFIG_RINCE_PURGE_CO2: return "Purge CO2";
+    case CONFIG_CLEAN:           return "Detergent";
+    case CONFIG_CLEAN_PURGE:     return "Purge deter.";
+    case CONFIG_SANITIZE:        return "Desinfectant";
+    case CONFIG_SANITIZE_PURGE:  return "Purge desinf.";
+    case CONFIG_CO2:             return "CO2";
+    case CTRL_WATER:             return "Eau";
+    case CTRL_CLEANER_IN:        return "Deter. IN";
+    case CTRL_SANITIZER_IN:      return "Desinf. IN";
+    case CTRL_AIR:               return "Air";
+    case CTRL_CLEANER_OUT:       return "Deterg. OUT";
+    case CTRL_SANITIZER_OUT:     return "Desinf. OUT";
+    case CTRL_PUMP:              return "Pompe";
+    case CONFIG_WARNING:         return "Cuves vides ?";
+    case CONFIG_WAIT:            return "Attente...";
+    default:                     return "";
+  }
+}
+
+// ============================================================
+// Actuator control
+// ============================================================
+
+// Tracks the previously active configuration to compute minimal transitions.
+// Initialised to 0 (all closed), consistent with the pre-drive HIGH in setup().
+unsigned int previous_config = 0;
+
+// Cumulated time spent in actuator transitions during the current mode (ms).
+// Subtracted from the elapsed time so the display shows real hydraulic time.
+unsigned long transition_overhead = 0;
+
+// Closes the actuators in the given bitmask, in safe order.
+// Closing order: pressure sources first, then outputs.
+// This prevents pressure from being trapped in the circuit.
+void close_actuators(unsigned int config)
+{
+  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,               VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,        VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,          VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,          VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,   VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN, VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT,  VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,        VALVE_CLOSE); delay(ACTUATOR_DELAY_MS); }
+}
+
+// Opens the actuators in the given bitmask, in safe order.
+// Opening order: outputs first, then inputs, then pump.
+// Ensures the circuit has a clear path before any pressure is applied.
+void open_actuators(unsigned int config)
+{
+  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,        VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT,  VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,   VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN, VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,               VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,          VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,          VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,        VALVE_OPEN); delay(ACTUATOR_DELAY_MS); }
+}
+
+// Transitions to a new valve configuration.
+// Only actuators that actually change state are touched:
+//   to_close = actuators that were open and are no longer needed
+//   to_open  = actuators that are needed and were not already open
+void controls_set(unsigned int config)
+{
+  unsigned int to_close = previous_config & ~config;
+  unsigned int to_open  = config & ~previous_config;
+
+  close_actuators(to_close);
+  open_actuators(to_open);
+
+  previous_config = config;
 }
 
 // ============================================================
@@ -429,109 +521,21 @@ void select_update()
   }
 }
 
-// Apply or remove a valve/actuator configuration.
-// config     : bitmask of actuators to act on
-// state      : VALVE_OPEN or VALVE_CLOSE
-// delay_time : milliseconds to wait between each individual actuator change
-//
-// Opening and closing are done in opposite orders to prevent pressure
-// damage and chemical cross-contamination when delay_time > 0.
-
-
-// Returns a human-readable label for the given valve configuration.
-const char* resolve_label(unsigned int config)
-{
-  switch(config) {
-    case CONFIG_DRAIN:          return "Vidange";
-    case CONFIG_DRAIN_SANITIZER:return "Vidange desinf.";
-    case CONFIG_DRAIN_CLEANER:  return "Vidange deter.";
-    case CONFIG_FILL_SANITIZER: return "Rempl. desinf.";
-    case CONFIG_FILL_CLEANER:   return "Rempl. deter.";
-    case CONFIG_RINCE:          return "Rincage";
-    case CONFIG_RINCE_PURGE:    return "Purge air";
-    case CONFIG_RINCE_PURGE_CO2:return "Purge CO2";
-    case CONFIG_CLEAN:          return "Detergent";
-    case CONFIG_CLEAN_PURGE:    return "Purge deter.";
-    case CONFIG_SANITIZE:       return "Desinfectant";
-    case CONFIG_SANITIZE_PURGE: return "Purge desinf.";
-    case CONFIG_CO2:            return "CO2";
-    case CTRL_WATER:            return "Eau";
-    case CTRL_CLEANER_IN:       return "Deter. IN";
-    case CTRL_SANITIZER_IN:     return "Desinf. IN";
-    case CTRL_AIR:              return "Air";
-    case CTRL_CLEANER_OUT:      return "Deterg. OUT";
-    case CTRL_SANITIZER_OUT:    return "Desinf. OUT";
-    case CTRL_PUMP:             return "Pompe";
-    case CONFIG_WARNING:        return "Cuves vides ?";
-    case CONFIG_WAIT:           return "Attente...";
-    default:                    return "";
-  }
-}
-
-// Closes the actuators in the given bitmask, in safe order.
-void close_actuators(unsigned int config)
-{
-  // Closing order: stop pressurised sources first, then outputs.
-  // This prevents pressure from being trapped in the circuit.
-  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,              VALVE_CLOSE); delay(200); }
-  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,       VALVE_CLOSE); delay(200); }
-  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,         VALVE_CLOSE); delay(200); }
-  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,         VALVE_CLOSE); delay(200); }
-  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,  VALVE_CLOSE); delay(200); }
-  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN,VALVE_CLOSE); delay(200); }
-  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT, VALVE_CLOSE); delay(200); }
-  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_CLOSE);delay(200); }
-  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,       VALVE_CLOSE); delay(200); }
-}
-
-// Opens the actuators in the given bitmask, in safe order.
-void open_actuators(unsigned int config)
-{
-  // Opening order: outputs first, then inputs, then pump.
-  // Ensures the circuit has a clear path before any pressure is applied.
-  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,        VALVE_OPEN); delay(200); }
-  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT,  VALVE_OPEN); delay(200); }
-  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_OPEN); delay(200); }
-  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,   VALVE_OPEN); delay(200); }
-  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN, VALVE_OPEN); delay(200); }
-  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,               VALVE_OPEN); delay(200); }
-  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,          VALVE_OPEN); delay(200); }
-  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,          VALVE_OPEN); delay(200); }
-  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,        VALVE_OPEN); delay(200); }
-}
-
-// Transition to a new valve configuration:
-// first close everything that is not needed, then open what is needed.
-// A 200 ms delay between each actuator change limits inrush current
-// from multiple relays switching simultaneously.
-
-// Tracks the previously active configuration to compute minimal transitions.
-unsigned int previous_config = 0;
-
-void controls_set(unsigned int config)
-{
-  unsigned int to_close = previous_config & ~config;
-  unsigned int to_open  = config & ~previous_config;
-
-  // Close all actuators not required by the new configuration
-  close_actuators(to_close);
-
-  // Open all actuators required by the new configuration
-  open_actuators(to_open);
-
-  previous_config = config;
-}
-
-// Activate the step at the given index: record its start time,
-// apply its valve configuration, and return that configuration.
+// Activate the step at the given index.
+// Transitions are applied first (blocking), then the step start time
+// is recorded so that step duration is measured from when the valves
+// are actually in their target state.
 unsigned int step_set(int index)
 {
   step = index;
-  step_start_time = seconds();
+  unsigned int cfg = MODES[mode].steps[index].config;
 
-  controls_set(MODES[mode].steps[step].config);
+  unsigned long t_before = millis();
+  controls_set(cfg);                                   // blocking transitions happen here
+  transition_overhead += millis() - t_before;          // accumulate transition duration (ms)
+  step_start_time = millis();                          // start chrono AFTER transitions (ms)
 
-  return MODES[mode].steps[step].config;
+  return cfg;
 }
 
 // Initialise a mode run: display the mode name, save the selected
@@ -550,15 +554,18 @@ void run()
     EEPROM.write(EEPROM_ADDRESS_MODE, mode);
   }
 
-  mode_start_time = seconds();
-
-  // Sum all step durations to compute the total mode duration
+  // Sum declared step durations — transition overhead is tracked separately
+  // in transition_overhead and subtracted from the displayed elapsed time,
+  // so both sides of the X/Y display are in pure hydraulic seconds.
   mode_full_time = 0;
-  for(int i=0 ; MODES[mode].steps[i].config != CONFIG_END ; i++ ) {
+  for(int i = 0; MODES[mode].steps[i].config != CONFIG_END; i++) {
     mode_full_time += MODES[mode].steps[i].duration;
   }
+  transition_overhead = 0;
+  previous_config = 0;  // ensure clean transition state at mode start
 
-  step_set(0);
+  step_set(0);                     // blocking transitions happen here
+  mode_start_time = millis();      // start chrono AFTER first step transitions (ms)
 
   state = STATE_RUN_UPDATE;
 }
@@ -575,8 +582,8 @@ void run_update()
   }
 
   // Advance to the next step if the current one has expired
-  int step_running_time = seconds() - step_start_time;
-  if( step_running_time >= MODES[mode].steps[step].duration ) {
+  // Comparison in ms for accurate step duration (avoids integer truncation in seconds())
+  if( millis() - step_start_time >= MODES[mode].steps[step].duration * 1000UL ) {
     unsigned int config = step_set( step + 1 );
     if( config == CONFIG_END ) {
       state = STATE_TERMINATE;
@@ -584,15 +591,17 @@ void run_update()
     }
   }
 
-  // Update the progress line: elapsed / total time
-  int mode_running_time = seconds() - mode_start_time;
-  int rtime_mn = mode_running_time / 60;
-  int rtime_s  = mode_running_time % 60;
-  int ftime_mn = mode_full_time / 60;
-  int ftime_s  = mode_full_time % 60;
+  // Update the progress line: elapsed / total time.
+  // All timestamps are in ms internally; divide to seconds only for display.
+  // transition_overhead is subtracted so only real hydraulic time is shown.
+  unsigned long mode_running_time = (millis() - mode_start_time - transition_overhead) / 1000;
+  unsigned long rtime_mn = mode_running_time / 60;
+  unsigned long rtime_s  = mode_running_time % 60;
+  unsigned long ftime_mn = mode_full_time / 60;
+  unsigned long ftime_s  = mode_full_time % 60;
 
   lcd.setCursor(0, 1);
-  lcd_printf(" %dmn%02d / %dmn%02d", rtime_mn, rtime_s, ftime_mn, ftime_s);
+  lcd_printf(" %lumn%02lu / %lumn%02lu", rtime_mn, rtime_s, ftime_mn, ftime_s);
 
   // Blink the top line between the step label and the mode name
   if( mode_running_time % LED_BLINK_PERIOD < LED_BLINK_PERIOD/2 ) {
