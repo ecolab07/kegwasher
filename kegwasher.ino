@@ -1,3 +1,9 @@
+// ============================================================
+// kegwasher.ino
+// Refactored: interrupt-driven rotary encoder + button (PCINT),
+// non-blocking actuator transitions, non-blocking buzzer.
+// ============================================================
+
 #include <stdarg.h>
 #include <EEPROM.h>
 #include <Bounce2.h>
@@ -9,9 +15,9 @@
 // Pin assignments
 // ============================================================
 #define PIN_BUZZER                A0
-#define PIN_MENUSELECT_1          A1  // Rotary encoder A
-#define PIN_MENUSELECT_2          A2  // Rotary encoder B
-#define PIN_BUTTON_ACTION         A3  // Confirm / cancel button
+#define PIN_MENUSELECT_1          A1  // Rotary encoder CLK
+#define PIN_MENUSELECT_2          A2  // Rotary encoder DT
+#define PIN_BUTTON_ACTION         A3  // Confirm / cancel button (SW)
 #define PIN_VALVE_AIR             2
 #define PIN_VALVE_CO2             3
 #define PIN_VALVE_WATER           4
@@ -29,26 +35,21 @@
 // Individual actuator control bits (9 bits, one per output)
 // ============================================================
 #define CTRL_WATER          0b000000001
-// Tank outlet = circuit inlet (liquid drawn from cleaner tank)
 #define CTRL_CLEANER_IN     0b000000010
-// Tank outlet = circuit inlet (liquid drawn from sanitizer tank)
 #define CTRL_SANITIZER_IN   0b000000100
 #define CTRL_AIR            0b000001000
 #define CTRL_CO2            0b000010000
 #define CTRL_DRAIN          0b000100000
-// Tank upper inlet = circuit outlet (liquid returns to cleaner tank)
 #define CTRL_CLEANER_OUT    0b001000000
-// Tank upper inlet = circuit outlet (liquid returns to sanitizer tank)
 #define CTRL_SANITIZER_OUT  0b010000000
 #define CTRL_PUMP           0b100000000
 
-// Extended flags used by the test mode only (bits 10 and 11,
-// outside the range of real actuator bits)
-#define CONFIG_WARNING  0b1000000000   // Prompt operator before firing any actuator (bit 10)
-#define CONFIG_WAIT     0b10000000000  // Idle gap between individual actuator pulses (bit 11)
+// Extended flags used by the test mode only
+#define CONFIG_WARNING  0b1000000000
+#define CONFIG_WAIT     0b10000000000
 
 // ============================================================
-// Composite valve configurations used by normal wash sequences
+// Composite valve configurations
 // ============================================================
 #define CONFIG_DRAIN            (CTRL_DRAIN)
 #define CONFIG_DRAIN_SANITIZER  (CTRL_PUMP + CTRL_SANITIZER_IN + CTRL_DRAIN)
@@ -63,114 +64,89 @@
 #define CONFIG_SANITIZE         (CTRL_PUMP + CTRL_SANITIZER_IN + CTRL_SANITIZER_OUT)
 #define CONFIG_SANITIZE_PURGE   (CTRL_AIR + CTRL_SANITIZER_OUT)
 #define CONFIG_CO2              (CTRL_CO2)
-#define CONFIG_END              0  // Sentinel value marking the end of a step array
+#define CONFIG_END              0
 
-// LED blink period in seconds during a running sequence
 #define LED_BLINK_PERIOD    2
 
-// Relay logic: relays are active-low
 #define VALVE_CLOSE HIGH
 #define VALVE_OPEN  LOW
+
+// Delay between individual actuator changes during a transition (ms)
+#define ACTUATOR_STEP_DELAY_MS  200
 
 // ============================================================
 // Data types
 // ============================================================
-
-// One step in a wash sequence: a valve configuration and its duration in seconds
 typedef struct step_s {
   unsigned int config;
   int duration;
 } step_t;
 
-// A named wash mode and its associated step array
 typedef struct mode_s {
   const char *name;
   step_t *steps;
 } mode_t;
 
 // ============================================================
-// Step arrays — one per operational mode
+// Step arrays
 // ============================================================
-
-// Drain sanitizer tank through the keg circuit — 200 s (3 min 20)
 step_t STEPS_DRAIN_SANITIZER[] = {
   {CONFIG_DRAIN_SANITIZER, 200},
   {CONFIG_END, 0}
 };
 
-// Drain cleaner tank through the keg circuit — 200 s (3 min 20)
 step_t STEPS_DRAIN_CLEANER[] = {
   {CONFIG_DRAIN_CLEANER, 200},
   {CONFIG_END, 0}
 };
 
-// Fill sanitizer tank — 120 s (2 min 00)
 step_t STEPS_FILL_SANITIZER[] = {
   {CONFIG_FILL_SANITIZER, 120},
   {CONFIG_END, 0}
 };
 
-// Fill cleaner tank — 120 s (2 min 00)
 step_t STEPS_FILL_CLEANER[] = {
   {CONFIG_FILL_CLEANER, 120},
   {CONFIG_END, 0}
 };
 
-// Full wash cycle without CO2 pressurisation — 325 s (5 min 25)
-// Reference: https://www.btobeer.com/themes-conseils-techniques-bieres-brasseries/conseils-carbonatation-process-et-analyses/futs-de-biere-a-plongeurs-incorpores-problemes-lies-au-lavage-et-sterilisation-des-futs
 step_t STEPS_WASH_KEG[] = {
-  // ===== Initial drain =====
-  {CONFIG_DRAIN, 10},           // Adjust if needed
-
-  // ===== Initial rinse =====
+  {CONFIG_DRAIN, 10},
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-
-  // ===== Detergent cycle =====
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 20},
-
-  // ===== Intermediate rinse =====
   {CONFIG_RINCE, 3},
   {CONFIG_RINCE_PURGE, 10},
   {CONFIG_RINCE, 7},
   {CONFIG_RINCE_PURGE, 10},
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-
-  // ===== Sanitization cycle =====
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-  {CONFIG_SANITIZE, 30},        // Adjust if needed
+  {CONFIG_SANITIZE, 30},
   {CONFIG_SANITIZE_PURGE, 20},
-
-  // ===== Final rinse + air purge =====
   {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE, 30},     // Adjust if needed
-
+  {CONFIG_RINCE_PURGE, 30},
   {CONFIG_END, 0}
 };
 
-// Detergent-only cycle (no sanitization, no CO2) — 185 s (3 min 05)
 step_t STEPS_DETER_KEG[] = {
-  {CONFIG_DRAIN, 10},           // Adjust if needed
-
+  {CONFIG_DRAIN, 10},
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 20},
-
   {CONFIG_RINCE, 3},
   {CONFIG_RINCE_PURGE, 10},
   {CONFIG_RINCE, 7},
@@ -180,122 +156,89 @@ step_t STEPS_DETER_KEG[] = {
   {CONFIG_END, 0}
 };
 
-// Full wash cycle with CO2 pressurisation at the end — 335 s (5 min 35)
 step_t STEPS_WASH_KEG_PRESSURIZE[] = {
-  // ===== Initial drain =====
-  {CONFIG_DRAIN, 10},           // Adjust if needed
-
-  // ===== Initial rinse =====
+  {CONFIG_DRAIN, 10},
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-
-  // ===== Detergent cycle =====
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
-
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 15},
-
   {CONFIG_CLEAN, 10},
   {CONFIG_CLEAN_PURGE, 20},
-
-  // ===== Intermediate rinse =====
   {CONFIG_RINCE, 3},
   {CONFIG_RINCE_PURGE, 10},
-
   {CONFIG_RINCE, 7},
   {CONFIG_RINCE_PURGE, 10},
-
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-
-  // ===== Sanitization cycle =====
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-
-  {CONFIG_SANITIZE, 30},        // Adjust if needed
+  {CONFIG_SANITIZE, 30},
   {CONFIG_SANITIZE_PURGE, 20},
-
-  // ===== Final rinse + CO2 purge + pressurisation =====
   {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
-  {CONFIG_CO2, 10},             // Adjust if needed
-
+  {CONFIG_RINCE_PURGE_CO2, 30},
+  {CONFIG_CO2, 10},
   {CONFIG_END, 0}
 };
 
-// Sanitization-only cycle with CO2 pressurisation — 190 s (3 min 10)
 step_t STEPS_SANITIZE_KEG_PRESSURIZE[] = {
-  {CONFIG_DRAIN, 10},           // Adjust if needed
-
+  {CONFIG_DRAIN, 10},
   {CONFIG_RINCE, 10},
   {CONFIG_RINCE_PURGE, 20},
-
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
   {CONFIG_SANITIZE, 10},
   {CONFIG_SANITIZE_PURGE, 15},
-  {CONFIG_SANITIZE, 30},        // Adjust if needed
+  {CONFIG_SANITIZE, 30},
   {CONFIG_SANITIZE_PURGE, 20},
-
   {CONFIG_RINCE, 10},
-  {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
-
-  {CONFIG_CO2, 10},             // Adjust if needed
+  {CONFIG_RINCE_PURGE_CO2, 30},
+  {CONFIG_CO2, 10},
   {CONFIG_END, 0}
 };
 
-// CO2 pressurisation only — 40 s
 step_t STEPS_KEG_PRESSURIZE[] = {
-  {CONFIG_DRAIN, 10},           // Adjust if needed
-  {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
-  {CONFIG_CO2, 10},             // Adjust if needed
+  {CONFIG_DRAIN, 10},
+  {CONFIG_RINCE_PURGE_CO2, 30},
+  {CONFIG_CO2, 10},
   {CONFIG_END, 0}
 };
 
-// Keg drain + air purge — 70 s (1 min 10)
 step_t STEPS_DRAIN_KEG[] = {
-  {CONFIG_DRAIN, 10},           // Adjust if needed
+  {CONFIG_DRAIN, 10},
   {CONFIG_RINCE_PURGE, 60},
   {CONFIG_END, 0}
 };
 
-// Actuator click-test — 22 s total.
-// Fires each valve and the pump individually, one at a time,
-// in relay-board order (left to right, top to bottom),
-// with a 1 s idle gap between each pulse.
-// WARNING: ensure all tanks are empty before running this mode.
 step_t STEPS_TEST_ACTUATORS[] = {
-    {CONFIG_WARNING, 3},      // Display safety prompt: confirm tanks are empty
-    {CONFIG_WAIT,    1},      // Idle gap
-
-    {CTRL_SANITIZER_OUT, 1},  // Sanitizer return valve
-    {CONFIG_WAIT,        1},
-    {CONFIG_DRAIN,         1},  // Drain valve
-    {CONFIG_WAIT,        1},
-    {CTRL_CLEANER_OUT,   1},  // Cleaner return valve
-    {CONFIG_WAIT,        1},
-    {CTRL_AIR,           1},  // Air inlet valve
-    {CONFIG_WAIT,        1},
-    {CONFIG_CO2,           1},  // CO2 inlet valve
-    {CONFIG_WAIT,        1},
-    {CTRL_SANITIZER_IN,  1},  // Sanitizer feed valve
-    {CONFIG_WAIT,        1},
-    {CTRL_WATER,         1},  // Water inlet valve
-    {CONFIG_WAIT,        1},
-    {CTRL_CLEANER_IN,    1},  // Cleaner feed valve
-    {CONFIG_WAIT,        1},
-    {CTRL_PUMP,          1},  // Circulation pump
-    {CONFIG_WAIT,        1},
-
-    {CONFIG_END, 0}
+  {CONFIG_WARNING,     3},
+  {CONFIG_WAIT,        1},
+  {CTRL_SANITIZER_OUT, 1},
+  {CONFIG_WAIT,        1},
+  {CONFIG_DRAIN,       1},
+  {CONFIG_WAIT,        1},
+  {CTRL_CLEANER_OUT,   1},
+  {CONFIG_WAIT,        1},
+  {CTRL_AIR,           1},
+  {CONFIG_WAIT,        1},
+  {CONFIG_CO2,         1},
+  {CONFIG_WAIT,        1},
+  {CTRL_SANITIZER_IN,  1},
+  {CONFIG_WAIT,        1},
+  {CTRL_WATER,         1},
+  {CONFIG_WAIT,        1},
+  {CTRL_CLEANER_IN,    1},
+  {CONFIG_WAIT,        1},
+  {CTRL_PUMP,          1},
+  {CONFIG_WAIT,        1},
+  {CONFIG_END,         0}
 };
 
 // ============================================================
-// Mode table — order determines rotary-encoder menu order
+// Mode table
 // ============================================================
 mode_t MODES[] = {
   {"Lavage + CO2",    STEPS_WASH_KEG_PRESSURIZE},
@@ -311,280 +254,332 @@ mode_t MODES[] = {
   {"Test vannes",     STEPS_TEST_ACTUATORS},
 };
 
-// Computed at runtime so new modes added above are counted automatically
 int MODES_NUMBER = sizeof(MODES) / sizeof(mode_t);
 
 // ============================================================
 // Hardware objects
 // ============================================================
-RotaryEncoder menuselect(PIN_MENUSELECT_1, PIN_MENUSELECT_2);
-Bounce buttonAction = Bounce();
+
+// Rotary encoder as pointer — required for ISR tick() call
+RotaryEncoder *menuselect = nullptr;
+
+// Button — ISR flag + millis() debounce (replaces Bounce2 for this use case)
+volatile bool buttonPressedFlag = false;  // set by ISR on falling edge (A3 LOW)
+uint32_t      buttonLastMs      = 0;      // timestamp of last validated press
+#define BUTTON_DEBOUNCE_MS 20
 
 LiquidCrystal_I2C lcd(DISPLAY_I2C_ADDRESS, 16, 2);
 
-// Custom LCD character: up/down arrows used in the selection screen
 #define CHAR_UP_DOWN  1
 byte CHAR_UP_DOWN_SETUP[] = {
-  B00100,
-  B01010,
-  B10001,
-  B00000,
-  B00000,
-  B10001,
-  B01010,
-  B00100
+  B00100, B01010, B10001, B00000,
+  B00000, B10001, B01010, B00100
 };
 
-// EEPROM address where the last selected mode index is persisted
 #define EEPROM_ADDRESS_MODE  0
 
 // ============================================================
-// State machine
+// State machine — declared early so transition_t and beep_t
+// can embed state_t without forward-declaration issues
 // ============================================================
 typedef enum state_e {
-  STATE_SELECT,         // Enter selection screen
-  STATE_SELECT_UPDATE,  // Poll encoder and button on selection screen
-  STATE_RUN,            // Initialise and start the selected mode
-  STATE_RUN_UPDATE,     // Advance through steps and update display
-  STATE_TERMINATE,      // Sequence completed normally
-  STATE_CANCEL          // Sequence aborted by the operator
+  STATE_SELECT,
+  STATE_SELECT_UPDATE,
+  STATE_RUN,
+  STATE_ACTUATORS_TRANSITION, // Non-blocking actuator sequencing
+  STATE_RUN_UPDATE,
+  STATE_TERMINATE,
+  STATE_TERMINATE_BEEP,       // Non-blocking buzzer after completion
+  STATE_CANCEL,
+  STATE_CANCEL_BEEP           // Non-blocking buzzer after cancel
 } state_t;
 
 state_t state = STATE_SELECT;
 
 // ============================================================
-// Global runtime variables
+// ISR — PCINT1_vect : Port C (A0–A5)
+// Handles A1 (PCINT9), A2 (PCINT10), A3 (PCINT11) in one vector
 // ============================================================
-int mode = 0;             // Index of the currently selected mode
-int mode_start_time;      // millis()-based timestamp when the mode started
-int mode_full_time;       // Total duration of the current mode in seconds
+ISR(PCINT1_vect) {
+  menuselect->tick();  // RotaryEncoder filters irrelevant pin changes internally
+  if (!(PINC & (1 << PC3))) {  // A3=PC3, LOW = pressed
+    buttonPressedFlag = true;
+  }
+}
 
-int step;                 // Index of the current step within the mode
-int step_start_time;      // Timestamp when the current step started
+// ============================================================
+// Non-blocking actuator transition
+// ============================================================
+
+// Ordered lists of bits to process, closing then opening
+// Closing order: pump → water → CO2 → air → cleaner_in → sanitizer_in → cleaner_out → sanitizer_out → drain
+// Opening order: drain → cleaner_out → sanitizer_out → cleaner_in → sanitizer_in → pump → air → CO2 → water
+static const unsigned int CLOSE_ORDER[] = {
+  CTRL_PUMP, CTRL_WATER, CTRL_CO2, CTRL_AIR,
+  CTRL_CLEANER_IN, CTRL_SANITIZER_IN,
+  CTRL_CLEANER_OUT, CTRL_SANITIZER_OUT, CTRL_DRAIN
+};
+static const unsigned int OPEN_ORDER[] = {
+  CTRL_DRAIN, CTRL_CLEANER_OUT, CTRL_SANITIZER_OUT,
+  CTRL_CLEANER_IN, CTRL_SANITIZER_IN,
+  CTRL_PUMP, CTRL_AIR, CTRL_CO2, CTRL_WATER
+};
+static const int ACTUATOR_COUNT = 9;
+
+typedef struct transition_s {
+  unsigned int to_close;    // bitmask of actuators to close
+  unsigned int to_open;     // bitmask of actuators to open
+  int          phase;       // 0 = closing phase, 1 = opening phase
+  int          index;       // current position in CLOSE_ORDER / OPEN_ORDER
+  uint32_t     last_ms;     // timestamp of last digitalWrite
+  state_t      next_state;  // state to enter once transition is complete
+} transition_t;
+
+transition_t tr;
+
+// Map a CTRL_ bit to its physical pin
+int bit_to_pin(unsigned int bit) {
+  switch(bit) {
+    case CTRL_WATER:         return PIN_VALVE_WATER;
+    case CTRL_CLEANER_IN:    return PIN_VALVE_CLEANER_IN;
+    case CTRL_SANITIZER_IN:  return PIN_VALVE_SANITIZER_IN;
+    case CTRL_AIR:           return PIN_VALVE_AIR;
+    case CTRL_CO2:           return PIN_VALVE_CO2;
+    case CTRL_DRAIN:         return PIN_VALVE_DRAIN;
+    case CTRL_CLEANER_OUT:   return PIN_VALVE_CLEANER_OUT;
+    case CTRL_SANITIZER_OUT: return PIN_VALVE_SANITIZER_OUT;
+    case CTRL_PUMP:          return PIN_PUMP;
+    default:                 return -1;
+  }
+}
+
+// Schedule a non-blocking transition from previous_config to config,
+// then go to next_state when done.
+unsigned int previous_config = 0;
+
+void controls_set(unsigned int config, state_t next_state) {
+  tr.to_close   = previous_config & ~config;
+  tr.to_open    = config & ~previous_config;
+  tr.phase      = 0;
+  tr.index      = 0;
+  tr.last_ms    = millis();
+  tr.next_state = next_state;
+  previous_config = config;
+  state = STATE_ACTUATORS_TRANSITION;
+}
+
+// Called every loop() iteration while STATE_ACTUATORS_TRANSITION is active.
+// Advances one actuator per ACTUATOR_STEP_DELAY_MS, then moves to next_state.
+void actuators_update() {
+  if (millis() - tr.last_ms < ACTUATOR_STEP_DELAY_MS) return;
+  tr.last_ms = millis();
+
+  if (tr.phase == 0) {
+    // Closing phase: scan CLOSE_ORDER
+    while (tr.index < ACTUATOR_COUNT) {
+      unsigned int bit = CLOSE_ORDER[tr.index++];
+      if (tr.to_close & bit) {
+        int pin = bit_to_pin(bit);
+        if (pin >= 0) digitalWrite(pin, VALVE_CLOSE);
+        return; // one actuator per call
+      }
+    }
+    // All closes done — move to opening phase
+    tr.phase = 1;
+    tr.index = 0;
+  }
+
+  if (tr.phase == 1) {
+    // Opening phase: scan OPEN_ORDER
+    while (tr.index < ACTUATOR_COUNT) {
+      unsigned int bit = OPEN_ORDER[tr.index++];
+      if (tr.to_open & bit) {
+        int pin = bit_to_pin(bit);
+        if (pin >= 0) digitalWrite(pin, VALVE_OPEN);
+        return; // one actuator per call
+      }
+    }
+    // All opens done — transition complete
+    state = tr.next_state;
+  }
+}
+
+// ============================================================
+// Non-blocking buzzer
+// ============================================================
+typedef struct beep_s {
+  int      count;       // remaining beeps
+  uint32_t last_ms;     // timestamp of last tone event
+  bool     tone_on;     // true = tone running, false = silence gap
+  state_t  next_state;  // state to enter when done
+} beep_t;
+
+beep_t beep;
+
+#define BEEP_TONE_HZ      1760
+#define BEEP_TONE_MS       800  // tone duration
+#define BEEP_SILENCE_MS    200  // silence between beeps
+
+void beep_start(int count, state_t next_state) {
+  beep.count      = count;
+  beep.last_ms    = millis();
+  beep.tone_on    = false;   // start with silence → then first tone
+  beep.next_state = next_state;
+}
+
+// Called every loop() iteration while STATE_TERMINATE_BEEP or STATE_CANCEL_BEEP
+void beep_update() {
+  uint32_t now = millis();
+
+  if (!beep.tone_on) {
+    // Silence gap elapsed → start next tone
+    if (now - beep.last_ms >= BEEP_SILENCE_MS) {
+      tone(PIN_BUZZER, BEEP_TONE_HZ, BEEP_TONE_MS);
+      beep.tone_on = true;
+      beep.last_ms = now;
+    }
+  } else {
+    // Tone elapsed → end of one beep
+    if (now - beep.last_ms >= BEEP_TONE_MS) {
+      beep.count--;
+      beep.tone_on = false;
+      beep.last_ms = now;
+      if (beep.count == 0) {
+        state = beep.next_state;
+      }
+    }
+  }
+}
 
 // ============================================================
 // Helpers
 // ============================================================
-
-// Printf-style wrapper for the LCD: formats into a 16-character
-// left-justified string and prints it at the current cursor position.
-void lcd_printf(const char *fmt, ...)
-{
+void lcd_printf(const char *fmt, ...) {
   char buf1[17];
   va_list args;
   va_start(args, fmt);
   vsnprintf(buf1, sizeof(buf1)-1, fmt, args);
   va_end(args);
-
   char buf2[17];
   snprintf(buf2, sizeof(buf2)-1, "%-16s", buf1);
   lcd.print(buf2);
 }
 
-// Returns the current time in whole seconds.
-int seconds()
-{
+int seconds() {
   return millis() / 1000;
 }
+
+const char* resolve_label(unsigned int config) {
+  switch(config) {
+    case CONFIG_DRAIN:           return "Vidange";
+    case CONFIG_DRAIN_SANITIZER: return "Vidange desinf.";
+    case CONFIG_DRAIN_CLEANER:   return "Vidange deter.";
+    case CONFIG_FILL_SANITIZER:  return "Rempl. desinf.";
+    case CONFIG_FILL_CLEANER:    return "Rempl. deter.";
+    case CONFIG_RINCE:           return "Rincage";
+    case CONFIG_RINCE_PURGE:     return "Purge air";
+    case CONFIG_RINCE_PURGE_CO2: return "Purge CO2";
+    case CONFIG_CLEAN:           return "Detergent";
+    case CONFIG_CLEAN_PURGE:     return "Purge deter.";
+    case CONFIG_SANITIZE:        return "Desinfectant";
+    case CONFIG_SANITIZE_PURGE:  return "Purge desinf.";
+    case CONFIG_CO2:             return "CO2";
+    case CTRL_WATER:             return "Eau";
+    case CTRL_CLEANER_IN:        return "Deter. IN";
+    case CTRL_SANITIZER_IN:      return "Desinf. IN";
+    case CTRL_AIR:               return "Air";
+    case CTRL_CLEANER_OUT:       return "Deterg. OUT";
+    case CTRL_SANITIZER_OUT:     return "Desinf. OUT";
+    case CTRL_PUMP:              return "Pompe";
+    case CONFIG_WARNING:         return "Cuves vides ?";
+    case CONFIG_WAIT:            return "Attente...";
+    default:                     return "";
+  }
+}
+
+// ============================================================
+// Global runtime variables
+// ============================================================
+int mode = 0;
+int mode_start_time;
+int mode_full_time;
+int current_step;
+int step_start_time;
 
 // ============================================================
 // State handlers
 // ============================================================
 
-// Display the mode selection screen and turn the LED on.
-void select()
-{
+void select() {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd_printf("Mode :");
   lcd.setCursor(0, 1);
   lcd_printf("%c %s", CHAR_UP_DOWN, MODES[mode].name);
-
   digitalWrite(PIN_LED, HIGH);
-
   state = STATE_SELECT_UPDATE;
 }
 
-// Poll the rotary encoder and button during mode selection.
-void select_update()
-{
-  int new_mode;
-  int pos;
+void select_update(bool buttonPressed) {
+  // Encoder — no tick() here, ISR handles it
+  int pos = menuselect->getPosition();
+  int new_mode = (pos + MODES_NUMBER) % MODES_NUMBER;
 
-  menuselect.tick();
-  pos = menuselect.getPosition();
-
-  // Map encoder position to a valid mode index (handles negative wrap-around)
-  new_mode = (pos + MODES_NUMBER) % MODES_NUMBER;
-
-  if( new_mode != mode ) {
+  if (new_mode != mode) {
     mode = new_mode;
     lcd.setCursor(0, 1);
     lcd_printf("%c %s", CHAR_UP_DOWN, MODES[mode].name);
   }
 
-  buttonAction.update();
-  if( buttonAction.fell() ) {
+  if (buttonPressed) {
     state = STATE_RUN;
   }
 }
 
-// Apply or remove a valve/actuator configuration.
-// config     : bitmask of actuators to act on
-// state      : VALVE_OPEN or VALVE_CLOSE
-// delay_time : milliseconds to wait between each individual actuator change
-//
-// Opening and closing are done in opposite orders to prevent pressure
-// damage and chemical cross-contamination when delay_time > 0.
-
-
-// Returns a human-readable label for the given valve configuration.
-const char* resolve_label(unsigned int config)
-{
-  switch(config) {
-    case CONFIG_DRAIN:          return "Vidange";
-    case CONFIG_DRAIN_SANITIZER:return "Vidange desinf.";
-    case CONFIG_DRAIN_CLEANER:  return "Vidange deter.";
-    case CONFIG_FILL_SANITIZER: return "Rempl. desinf.";
-    case CONFIG_FILL_CLEANER:   return "Rempl. deter.";
-    case CONFIG_RINCE:          return "Rincage";
-    case CONFIG_RINCE_PURGE:    return "Purge air";
-    case CONFIG_RINCE_PURGE_CO2:return "Purge CO2";
-    case CONFIG_CLEAN:          return "Detergent";
-    case CONFIG_CLEAN_PURGE:    return "Purge deter.";
-    case CONFIG_SANITIZE:       return "Desinfectant";
-    case CONFIG_SANITIZE_PURGE: return "Purge desinf.";
-    case CONFIG_CO2:            return "CO2";
-    case CTRL_WATER:            return "Eau";
-    case CTRL_CLEANER_IN:       return "Deter. IN";
-    case CTRL_SANITIZER_IN:     return "Desinf. IN";
-    case CTRL_AIR:              return "Air";
-    case CTRL_CLEANER_OUT:      return "Deterg. OUT";
-    case CTRL_SANITIZER_OUT:    return "Desinf. OUT";
-    case CTRL_PUMP:             return "Pompe";
-    case CONFIG_WARNING:        return "Cuves vides ?";
-    case CONFIG_WAIT:           return "Attente...";
-    default:                    return "";
-  }
+unsigned int step_set(int index) {
+  current_step     = index;
+  step_start_time  = seconds();
+  unsigned int cfg = MODES[mode].steps[current_step].config;
+  // Transition to new config, return to RUN_UPDATE when done
+  controls_set(cfg, STATE_RUN_UPDATE);
+  return cfg;
 }
 
-// Closes the actuators in the given bitmask, in safe order.
-void close_actuators(unsigned int config)
-{
-  // Closing order: stop pressurised sources first, then outputs.
-  // This prevents pressure from being trapped in the circuit.
-  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,              VALVE_CLOSE); delay(200); }
-  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,       VALVE_CLOSE); delay(200); }
-  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,         VALVE_CLOSE); delay(200); }
-  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,         VALVE_CLOSE); delay(200); }
-  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,  VALVE_CLOSE); delay(200); }
-  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN,VALVE_CLOSE); delay(200); }
-  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT, VALVE_CLOSE); delay(200); }
-  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_CLOSE);delay(200); }
-  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,       VALVE_CLOSE); delay(200); }
-}
-
-// Opens the actuators in the given bitmask, in safe order.
-void open_actuators(unsigned int config)
-{
-  // Opening order: outputs first, then inputs, then pump.
-  // Ensures the circuit has a clear path before any pressure is applied.
-  if(config & CTRL_DRAIN)         { digitalWrite(PIN_VALVE_DRAIN,        VALVE_OPEN); delay(200); }
-  if(config & CTRL_CLEANER_OUT)   { digitalWrite(PIN_VALVE_CLEANER_OUT,  VALVE_OPEN); delay(200); }
-  if(config & CTRL_SANITIZER_OUT) { digitalWrite(PIN_VALVE_SANITIZER_OUT,VALVE_OPEN); delay(200); }
-  if(config & CTRL_CLEANER_IN)    { digitalWrite(PIN_VALVE_CLEANER_IN,   VALVE_OPEN); delay(200); }
-  if(config & CTRL_SANITIZER_IN)  { digitalWrite(PIN_VALVE_SANITIZER_IN, VALVE_OPEN); delay(200); }
-  if(config & CTRL_PUMP)          { digitalWrite(PIN_PUMP,               VALVE_OPEN); delay(200); }
-  if(config & CTRL_AIR)           { digitalWrite(PIN_VALVE_AIR,          VALVE_OPEN); delay(200); }
-  if(config & CTRL_CO2)           { digitalWrite(PIN_VALVE_CO2,          VALVE_OPEN); delay(200); }
-  if(config & CTRL_WATER)         { digitalWrite(PIN_VALVE_WATER,        VALVE_OPEN); delay(200); }
-}
-
-// Transition to a new valve configuration:
-// first close everything that is not needed, then open what is needed.
-// A 200 ms delay between each actuator change limits inrush current
-// from multiple relays switching simultaneously.
-
-// Tracks the previously active configuration to compute minimal transitions.
-unsigned int previous_config = 0;
-
-void controls_set(unsigned int config)
-{
-  unsigned int to_close = previous_config & ~config;
-  unsigned int to_open  = config & ~previous_config;
-
-  // Close all actuators not required by the new configuration
-  close_actuators(to_close);
-
-  // Open all actuators required by the new configuration
-  open_actuators(to_open);
-
-  previous_config = config;
-}
-
-// Activate the step at the given index: record its start time,
-// apply its valve configuration, and return that configuration.
-unsigned int step_set(int index)
-{
-  step = index;
-  step_start_time = seconds();
-
-  controls_set(MODES[mode].steps[step].config);
-
-  return MODES[mode].steps[step].config;
-}
-
-// Initialise a mode run: display the mode name, save the selected
-// mode to EEPROM, compute the total duration, and start step 0.
-void run()
-{
+void run() {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd_printf(MODES[mode].name);
   lcd.setCursor(0, 1);
   lcd_printf("Preparation");
 
-  // Persist the selected mode so it is pre-selected on next power-up
   int saved_mode = EEPROM.read(EEPROM_ADDRESS_MODE);
-  if( mode != saved_mode ) {
-    EEPROM.write(EEPROM_ADDRESS_MODE, mode);
-  }
+  if (mode != saved_mode) EEPROM.write(EEPROM_ADDRESS_MODE, mode);
 
   mode_start_time = seconds();
-
-  // Sum all step durations to compute the total mode duration
-  mode_full_time = 0;
-  for(int i=0 ; MODES[mode].steps[i].config != CONFIG_END ; i++ ) {
+  mode_full_time  = 0;
+  for (int i = 0; MODES[mode].steps[i].config != CONFIG_END; i++) {
     mode_full_time += MODES[mode].steps[i].duration;
   }
 
   step_set(0);
-
-  state = STATE_RUN_UPDATE;
+  // state is now STATE_ACTUATORS_TRANSITION → will return to STATE_RUN_UPDATE
 }
 
-// Called every loop iteration while a mode is running.
-// Advances to the next step when the current one expires,
-// updates the progress display, and blinks the LED + label.
-void run_update()
-{
-  buttonAction.update();
-  if( buttonAction.fell() ) {
-    state = STATE_CANCEL;
-    return;
-  }
-
-  // Advance to the next step if the current one has expired
+void run_update(bool buttonPressed) {
+  // Advance step if duration elapsed
   int step_running_time = seconds() - step_start_time;
-  if( step_running_time >= MODES[mode].steps[step].duration ) {
-    unsigned int config = step_set( step + 1 );
-    if( config == CONFIG_END ) {
+  if (step_running_time >= MODES[mode].steps[current_step].duration) {
+    unsigned int config = MODES[mode].steps[current_step + 1].config;
+    if (config == CONFIG_END) {
       state = STATE_TERMINATE;
       return;
     }
+    step_set(current_step + 1);
+    // state → STATE_ACTUATORS_TRANSITION → STATE_RUN_UPDATE
+    return;
   }
 
-  // Update the progress line: elapsed / total time
+  // Progress display
   int mode_running_time = seconds() - mode_start_time;
   int rtime_mn = mode_running_time / 60;
   int rtime_s  = mode_running_time % 60;
@@ -594,124 +589,149 @@ void run_update()
   lcd.setCursor(0, 1);
   lcd_printf(" %dmn%02d / %dmn%02d", rtime_mn, rtime_s, ftime_mn, ftime_s);
 
-  // Blink the top line between the step label and the mode name
-  if( mode_running_time % LED_BLINK_PERIOD < LED_BLINK_PERIOD/2 ) {
+  // Blink top line between step label and mode name
+  if (mode_running_time % LED_BLINK_PERIOD < LED_BLINK_PERIOD / 2) {
     digitalWrite(PIN_LED, HIGH);
     lcd.setCursor(0, 0);
-    lcd_printf(resolve_label(MODES[mode].steps[step].config));
-  }
-  else {
+    lcd_printf(resolve_label(MODES[mode].steps[current_step].config));
+  } else {
     digitalWrite(PIN_LED, LOW);
     lcd.setCursor(0, 0);
     lcd_printf(MODES[mode].name);
   }
 }
 
-// Called when all steps have completed: close all actuators,
-// play three confirmation beeps, and return to the selection screen.
-void terminate()
-{
-  controls_set(0);
-
+void terminate() {
+  // Close all actuators first (non-blocking), then beep
+  controls_set(0, STATE_TERMINATE_BEEP);
   digitalWrite(PIN_LED, LOW);
-
   lcd.setCursor(0, 1);
   lcd_printf(" Termine");
-
-  for( int i=0 ; i<3 ; i++ ) {
-    tone(PIN_BUZZER, 1760, 800);
-    delay(1000);
-  }
-
-  state = STATE_SELECT;
+  beep_start(3, STATE_SELECT);
+  // actual beeping starts once STATE_ACTUATORS_TRANSITION → STATE_TERMINATE_BEEP
 }
 
-// Called when the operator aborts a running sequence: close all
-// actuators, play a single beep, and return to the selection screen.
-void cancel()
-{
-  controls_set(0);
-
+void cancel() {
+  controls_set(0, STATE_CANCEL_BEEP);
   digitalWrite(PIN_LED, LOW);
-
   lcd.setCursor(0, 1);
   lcd_printf(" Annule");
-
-  tone(PIN_BUZZER, 1760, 800);
-  delay(1000);
-
-  state = STATE_SELECT;
+  beep_start(1, STATE_SELECT);
 }
 
 // ============================================================
 // Arduino entry points
 // ============================================================
 
-void setup()
-{
-  // Pre-drive all relay pins HIGH before configuring them as outputs.
-  // This prevents the brief LOW glitch that would otherwise energise
-  // relays at power-up and avoids an inrush current spike.
-  digitalWrite(PIN_VALVE_AIR, HIGH);
-  digitalWrite(PIN_VALVE_CO2, HIGH);
-  digitalWrite(PIN_VALVE_WATER, HIGH);
-  digitalWrite(PIN_VALVE_CLEANER_IN, HIGH);
+void setup() {
+  // Pre-drive relay pins HIGH before OUTPUT mode to avoid power-on glitch
+  digitalWrite(PIN_VALVE_AIR,          HIGH);
+  digitalWrite(PIN_VALVE_CO2,          HIGH);
+  digitalWrite(PIN_VALVE_WATER,        HIGH);
+  digitalWrite(PIN_VALVE_CLEANER_IN,   HIGH);
   digitalWrite(PIN_VALVE_SANITIZER_IN, HIGH);
-  digitalWrite(PIN_VALVE_CLEANER_OUT, HIGH);
-  digitalWrite(PIN_VALVE_SANITIZER_OUT, HIGH);
-  digitalWrite(PIN_VALVE_DRAIN, HIGH);
-  digitalWrite(PIN_PUMP, HIGH);
+  digitalWrite(PIN_VALVE_CLEANER_OUT,  HIGH);
+  digitalWrite(PIN_VALVE_SANITIZER_OUT,HIGH);
+  digitalWrite(PIN_VALVE_DRAIN,        HIGH);
+  digitalWrite(PIN_PUMP,               HIGH);
 
-  pinMode(PIN_BUTTON_ACTION, INPUT_PULLUP);
-  pinMode(PIN_VALVE_AIR, OUTPUT);
-  pinMode(PIN_VALVE_CO2, OUTPUT);
-  pinMode(PIN_VALVE_WATER, OUTPUT);
-  pinMode(PIN_VALVE_CLEANER_IN, OUTPUT);
+  pinMode(PIN_VALVE_AIR,          OUTPUT);
+  pinMode(PIN_VALVE_CO2,          OUTPUT);
+  pinMode(PIN_VALVE_WATER,        OUTPUT);
+  pinMode(PIN_VALVE_CLEANER_IN,   OUTPUT);
   pinMode(PIN_VALVE_SANITIZER_IN, OUTPUT);
-  pinMode(PIN_VALVE_CLEANER_OUT, OUTPUT);
-  pinMode(PIN_VALVE_SANITIZER_OUT, OUTPUT);
-  pinMode(PIN_VALVE_DRAIN, OUTPUT);
-  pinMode(PIN_LED, OUTPUT);
-  pinMode(PIN_PUMP, OUTPUT);
-  pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_VALVE_CLEANER_OUT,  OUTPUT);
+  pinMode(PIN_VALVE_SANITIZER_OUT,OUTPUT);
+  pinMode(PIN_VALVE_DRAIN,        OUTPUT);
+  pinMode(PIN_LED,                OUTPUT);
+  pinMode(PIN_PUMP,               OUTPUT);
+  pinMode(PIN_BUZZER,             OUTPUT);
 
   delay(100);
-
-  digitalWrite(PIN_LED, LOW);
+  digitalWrite(PIN_LED,    LOW);
   digitalWrite(PIN_BUZZER, LOW);
 
-  buttonAction.attach(PIN_BUTTON_ACTION);
-  buttonAction.interval(10);  // Debounce interval in ms
+  Serial.begin(115200);
+  while (!Serial);
+  Serial.println(F("=== kegwasher boot ==="));
+
+  // Rotary encoder — pointer, required for ISR
+  menuselect = new RotaryEncoder(PIN_MENUSELECT_1, PIN_MENUSELECT_2, RotaryEncoder::LatchMode::FOUR3);
+
+  // Button pin — INPUT_PULLUP (ISR detects falling edge on PC3/A3)
+  pinMode(PIN_BUTTON_ACTION, INPUT_PULLUP);
+
+  Serial.print(F("[SETUP] PIN_BUTTON_ACTION initial state="));
+  Serial.println(digitalRead(PIN_BUTTON_ACTION) == LOW ? F("LOW") : F("HIGH"));
+
+  // Activate Pin Change Interrupts for Port C:
+  // A1 = PCINT9, A2 = PCINT10, A3 = PCINT11
+  PCICR  |= (1 << PCIE1);
+  PCMSK1 |= (1 << PCINT9) | (1 << PCINT10) | (1 << PCINT11);
+
+  Serial.print(F("[SETUP] PCICR=0b"));  Serial.println(PCICR,  BIN);
+  Serial.print(F("[SETUP] PCMSK1=0b")); Serial.println(PCMSK1, BIN);
 
   lcd.init();
   lcd.backlight();
   lcd.createChar(CHAR_UP_DOWN, CHAR_UP_DOWN_SETUP);
 
-  // Restore the last selected mode from EEPROM, clamped to valid range
   mode = EEPROM.read(EEPROM_ADDRESS_MODE);
   mode = constrain(mode, 0, MODES_NUMBER - 1);
 }
 
-void loop()
-{
-  switch(state) {
+void loop() {
+  // Button — validate ISR flag with millis() debounce
+  bool buttonPressed = false;
+  if (buttonPressedFlag) {
+    buttonPressedFlag = false;
+    uint32_t now = millis();
+    if (now - buttonLastMs >= BUTTON_DEBOUNCE_MS) {
+      buttonLastMs  = now;
+      buttonPressed = true;
+      Serial.print(F("[BTN] press validated state="));
+      Serial.println((int)state);
+    } else {
+      Serial.println(F("[BTN] press ignored (debounce)"));
+    }
+  }
+
+  // Cancel is handled globally — valid once a sequence is actually running.
+  // STATE_RUN is excluded: it's a one-shot init state, not an execution state.
+  if (buttonPressed &&
+      (state == STATE_RUN_UPDATE ||
+       state == STATE_ACTUATORS_TRANSITION)) {
+    Serial.println(F("[BTN] CANCEL"));
+    state = STATE_CANCEL;
+  }
+
+  switch (state) {
     case STATE_SELECT:
       select();
       break;
     case STATE_SELECT_UPDATE:
-      select_update();
+      select_update(buttonPressed);
       break;
     case STATE_RUN:
       run();
       break;
+    case STATE_ACTUATORS_TRANSITION:
+      actuators_update();
+      break;
     case STATE_RUN_UPDATE:
-      run_update();
+      run_update(buttonPressed);
       break;
     case STATE_TERMINATE:
       terminate();
       break;
+    case STATE_TERMINATE_BEEP:
+      beep_update();
+      break;
     case STATE_CANCEL:
       cancel();
+      break;
+    case STATE_CANCEL_BEEP:
+      beep_update();
       break;
   }
 }
