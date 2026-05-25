@@ -444,8 +444,8 @@ void select_update()
   menuselect.tick();
   pos = menuselect.getPosition();
 
-  // Map encoder position to a valid mode index (handles negative wrap-around)
-  new_mode = (pos + MODES_NUMBER) % MODES_NUMBER;
+  // Modulo always positive, regardless of the amplitude
+  new_mode = ((pos % MODES_NUMBER) + MODES_NUMBER) % MODES_NUMBER;
 
   if( new_mode != mode ) {
     mode = new_mode;
