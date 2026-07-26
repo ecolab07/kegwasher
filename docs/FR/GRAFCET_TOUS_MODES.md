@@ -481,7 +481,7 @@ flowchart TD
     subgraph STEPS["Mode Remplissage désinfectant"]
         direction TB
         Start(["Sélection du mode<br/>Rempl. désinf."])
-        Fill["Remplissage cuve désinfectant<br/>120 s"]
+        Fill["Remplissage&nbsp;cuve&nbsp;désinfectant<br/>120 s"]
         End(["Fin de cycle<br/>3 bips"])
         Start -->|Appui bouton| Fill
         Fill --> End
@@ -508,7 +508,7 @@ flowchart TD
     subgraph STEPS["Mode Remplissage détergent"]
         direction TB
         Start(["Sélection du mode<br/>Rempl. déter."])
-        Fill["Remplissage cuve détergent<br/>120 s"]
+        Fill["Remplissage&nbsp;cuve&nbsp;détergent<br/>120 s"]
         End(["Fin de cycle<br/>3 bips"])
         Start -->|Appui bouton| Fill
         Fill --> End
@@ -528,7 +528,7 @@ flowchart TD
     subgraph STEPS["Mode Test vannes"]
         direction TB
         Start(["Sélection du mode<br/>Test vannes"])
-        Warn{{"Confirmation : cuves vides ?<br/>5 s"}}
+        Warn{{"Confirmation :<br/>cuves vides ?<br/>5 s"}}
         T1["Vanne retour désinfectant<br/>1 s"]
         T2["Vanne vidange<br/>1 s"]
         T3["Vanne retour détergent<br/>1 s"]
