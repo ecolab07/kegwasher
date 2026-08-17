@@ -42,7 +42,7 @@
 #define CTRL_SANITIZER_OUT  0b010000000
 #define CTRL_PUMP           0b100000000
 
-// Extended flags used by the test mode only (bits 10 and 11,
+// Extended flags used by the "Test vannes" mode only (bits 10 and 11,
 // outside the range of real actuator bits)
 #define CONFIG_WARNING  0b1000000000   // Prompt operator before firing any actuator (bit 10)
 #define CONFIG_WAIT     0b10000000000  // Idle gap between individual actuator pulses (bit 11)
@@ -82,43 +82,50 @@ typedef struct step_s {
   unsigned long duration;
 } step_t;
 
-// A named wash mode and its associated step array
+// A named wash mode and its associated step array. `steps` points into
+// flash (PROGMEM) — always read it via read_step(), never dereference
+// it directly.
 typedef struct mode_s {
   const char *name;
-  step_t *steps;
+  const step_t *steps;
 } mode_t;
 
 // ============================================================
 // Step arrays — one per operational mode
+//
+// Marked PROGMEM: these stay in flash instead of being copied into RAM
+// at boot. Read them only through read_step(), which copies a single
+// entry into a RAM-resident step_t via memcpy_P() — direct indexing
+// (steps[i].config) would read garbage on AVR once a table is PROGMEM.
 // ============================================================
 
 // Drain sanitizer tank through the keg circuit — 200 s (3 min 20)
-step_t STEPS_DRAIN_SANITIZER[] = {
+const step_t STEPS_DRAIN_SANITIZER[] PROGMEM = {
   {CONFIG_DRAIN_SANITIZER, 200},
   {CONFIG_END, 0}
 };
 
 // Drain cleaner tank through the keg circuit — 200 s (3 min 20)
-step_t STEPS_DRAIN_CLEANER[] = {
+const step_t STEPS_DRAIN_CLEANER[] PROGMEM = {
   {CONFIG_DRAIN_CLEANER, 200},
   {CONFIG_END, 0}
 };
 
 // Fill sanitizer tank — 120 s (2 min 00)
-step_t STEPS_FILL_SANITIZER[] = {
+const step_t STEPS_FILL_SANITIZER[] PROGMEM = {
   {CONFIG_FILL_SANITIZER, 120},
   {CONFIG_END, 0}
 };
 
 // Fill cleaner tank — 120 s (2 min 00)
-step_t STEPS_FILL_CLEANER[] = {
+const step_t STEPS_FILL_CLEANER[] PROGMEM = {
   {CONFIG_FILL_CLEANER, 120},
   {CONFIG_END, 0}
 };
 
 // Full wash cycle without CO2 pressurisation — 325 s (5 min 25)
 // Reference: https://www.btobeer.com/themes-conseils-techniques-bieres-brasseries/conseils-carbonatation-process-et-analyses/futs-de-biere-a-plongeurs-incorpores-problemes-lies-au-lavage-et-sterilisation-des-futs
-step_t STEPS_WASH_KEG[] = {
+const step_t STEPS_WASH_KEG[] PROGMEM = {
   // ===== Initial drain =====
   {CONFIG_DRAIN, 10},           // Adjust if needed
 
@@ -158,7 +165,7 @@ step_t STEPS_WASH_KEG[] = {
 };
 
 // Detergent-only cycle (no sanitization, no CO2) — 185 s (3 min 05)
-step_t STEPS_DETER_KEG[] = {
+const step_t STEPS_DETER_KEG[] PROGMEM = {
   {CONFIG_DRAIN, 10},           // Adjust if needed
 
   {CONFIG_RINCE, 10},
@@ -181,7 +188,7 @@ step_t STEPS_DETER_KEG[] = {
 };
 
 // Full wash cycle with CO2 pressurisation at the end — 335 s (5 min 35)
-step_t STEPS_WASH_KEG_PRESSURIZE[] = {
+const step_t STEPS_WASH_KEG_PRESSURIZE[] PROGMEM = {
   // ===== Initial drain =====
   {CONFIG_DRAIN, 10},           // Adjust if needed
 
@@ -228,7 +235,7 @@ step_t STEPS_WASH_KEG_PRESSURIZE[] = {
 };
 
 // Sanitization-only cycle with CO2 pressurisation — 190 s (3 min 10)
-step_t STEPS_SANITIZE_KEG_PRESSURIZE[] = {
+const step_t STEPS_SANITIZE_KEG_PRESSURIZE[] PROGMEM = {
   {CONFIG_DRAIN, 10},           // Adjust if needed
 
   {CONFIG_RINCE, 10},
@@ -249,7 +256,7 @@ step_t STEPS_SANITIZE_KEG_PRESSURIZE[] = {
 };
 
 // CO2 pressurisation only — 40 s
-step_t STEPS_KEG_PRESSURIZE[] = {
+const step_t STEPS_KEG_PRESSURIZE[] PROGMEM = {
   {CONFIG_DRAIN, 10},           // Adjust if needed
   {CONFIG_RINCE_PURGE_CO2, 30}, // Adjust if needed
   {CONFIG_CO2, 10},             // Adjust if needed
@@ -257,18 +264,19 @@ step_t STEPS_KEG_PRESSURIZE[] = {
 };
 
 // Keg drain + air purge — 70 s (1 min 10)
-step_t STEPS_DRAIN_KEG[] = {
+const step_t STEPS_DRAIN_KEG[] PROGMEM = {
   {CONFIG_DRAIN, 10},           // Adjust if needed
   {CONFIG_RINCE_PURGE, 60},
   {CONFIG_END, 0}
 };
 
-// Actuator click-test — 24 s total.
-// Fires each valve and the pump individually, one at a time,
-// in relay-board order (left to right, top to bottom),
-// with a 1 s idle gap between each pulse.
+// Actuator click-test — 24 s total. Maintenance check, kept in production:
+// fires each valve and the pump individually, one at a time, in relay-board
+// order (left to right, top to bottom), with a 1 s idle gap between each
+// pulse — a quick way to confirm every actuator still clicks and every
+// wire is still connected, without running a full wash cycle.
 // WARNING: ensure all tanks are empty before running this mode.
-step_t STEPS_TEST_ACTUATORS[] = {
+const step_t STEPS_TEST_ACTUATORS[] PROGMEM = {
     {CONFIG_WARNING, 5},      // Display safety prompt: confirm tanks are empty
     {CONFIG_WAIT,    1},      // Idle gap
 
@@ -336,7 +344,58 @@ byte CHAR_UP_DOWN_SETUP[] = {
 };
 
 // EEPROM address where the last selected mode index is persisted
-#define EEPROM_ADDRESS_MODE  0
+#define EEPROM_ADDRESS_MODE        0
+// 1 while a step-array mode is running, written back to 0 only by a clean
+// terminate() or cancel(). If this is still 1 at boot, the Arduino restarted
+// mid-cycle (most likely a relay-module brown-out) instead of finishing
+// normally — see resume_warning().
+#define EEPROM_ADDRESS_CYCLE_FLAG  1
+// Index of the last step reached before the interruption (diagnostic only)
+#define EEPROM_ADDRESS_CYCLE_STEP  2
+
+// ============================================================
+// Reset-cause capture
+//
+// Reads MCUSR (which AVR sets on every reset and does not clear itself)
+// as early as possible — before Arduino's own init() runs — so we can
+// tell a normal power-up apart from a brown-out (voltage dip), external,
+// or watchdog reset. This is what lets resume_warning() report whether
+// an interrupted cycle was actually caused by a power dip.
+// ============================================================
+#if defined(__AVR__)
+#include <avr/wdt.h>
+
+uint8_t reset_cause __attribute__((section(".noinit")));
+
+void capture_reset_cause(void) __attribute__((naked, used, section(".init3")));
+void capture_reset_cause(void)
+{
+  reset_cause = MCUSR;
+  MCUSR = 0;
+  wdt_disable();
+}
+
+// Cause labels kept in flash (PROGMEM): read only via lcd_printf_P().
+const char MSG_CAUSE_BOR[]     PROGMEM = "coupure (BOR)";
+const char MSG_CAUSE_WDT[]     PROGMEM = "watchdog";
+const char MSG_CAUSE_EXT[]     PROGMEM = "reset externe";
+const char MSG_CAUSE_PWR[]     PROGMEM = "mise s. tension";
+const char MSG_CAUSE_UNKNOWN[] PROGMEM = "inconnue";
+
+// Short label for the captured reset cause (kept short: 16-char LCD line).
+// Returns a flash pointer — display it with lcd_printf_P(), not lcd_printf().
+const char* reset_cause_label()
+{
+  if( reset_cause & (1 << BORF) )  return MSG_CAUSE_BOR;
+  if( reset_cause & (1 << WDRF) )  return MSG_CAUSE_WDT;
+  if( reset_cause & (1 << EXTRF) ) return MSG_CAUSE_EXT;
+  if( reset_cause & (1 << PORF) )  return MSG_CAUSE_PWR;
+  return MSG_CAUSE_UNKNOWN;
+}
+#else
+// Non-AVR fallback so this file stays portable for off-target syntax checks.
+const char* reset_cause_label() { return "inconnue"; }
+#endif
 
 // ============================================================
 // State machine
@@ -347,7 +406,11 @@ typedef enum state_e {
   STATE_RUN,            // Initialise and start the selected mode
   STATE_RUN_UPDATE,     // Advance through steps and update display
   STATE_TERMINATE,      // Sequence completed normally
-  STATE_CANCEL          // Sequence aborted by the operator
+  STATE_CANCEL,         // Sequence aborted by the operator
+
+  // Shown at boot only, if the previous cycle never reached a clean exit
+  STATE_RESUME_WARNING,         // Display the interrupted-cycle warning
+  STATE_RESUME_WARNING_UPDATE   // Poll button to acknowledge and clear the flag
 } state_t;
 
 state_t state = STATE_SELECT;
@@ -368,12 +431,29 @@ unsigned long step_start_time;   // Timestamp (s) when the current step started
 
 // Printf-style wrapper for the LCD: formats into a 16-character
 // left-justified string and prints it at the current cursor position.
+// Use this when `fmt` (or any %s argument) lives in RAM.
 void lcd_printf(const char *fmt, ...)
 {
   char buf1[17];
   va_list args;
   va_start(args, fmt);
   vsnprintf(buf1, sizeof(buf1), fmt, args);
+  va_end(args);
+
+  char buf2[17];
+  snprintf(buf2, sizeof(buf2), "%-16s", buf1);
+  lcd.print(buf2);
+}
+
+// Same as lcd_printf(), but for a format string that lives in flash
+// (PROGMEM) — e.g. the fixed headers on the interrupted-cycle screen,
+// or the strings returned by reset_cause_label().
+void lcd_printf_P(const char *fmt, ...)
+{
+  char buf1[17];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf_P(buf1, sizeof(buf1), fmt, args);
   va_end(args);
 
   char buf2[17];
@@ -417,6 +497,17 @@ const char* resolve_label(unsigned int config)
   }
 }
 
+// Copies a single step from a PROGMEM step array into a RAM-resident
+// step_t. Every access to a STEPS_*[] table must go through this —
+// direct indexing (steps[i].config) is undefined once the array is
+// PROGMEM, since it would read raw flash bytes as if they were RAM.
+step_t read_step(const step_t *steps, int index)
+{
+  step_t s;
+  memcpy_P(&s, &steps[index], sizeof(step_t));
+  return s;
+}
+
 // ============================================================
 // State handlers
 // ============================================================
@@ -445,6 +536,13 @@ void select_update()
   pos = menuselect.getPosition();
 
   // Modulo always positive, regardless of the amplitude
+  // NOTE: no encoder re-anchoring here (unlike an earlier revision of this
+  // sketch) — select() is currently the only screen polling menuselect,
+  // so the raw position can never drift out of sync. If a second screen
+  // ever polls the encoder too (e.g. a settings submenu), reintroduce a
+  // per-screen base offset (position - current_index, applied on entry)
+  // to keep the two menus independent — see the diagnostic sketch's
+  // menuselect_base pattern for a working example of that.
   new_mode = ((pos % MODES_NUMBER) + MODES_NUMBER) % MODES_NUMBER;
 
   if( new_mode != mode ) {
@@ -520,7 +618,10 @@ void controls_set(unsigned int config)
 unsigned int step_set(int index)
 {
   step = index;
-  unsigned int cfg = MODES[mode].steps[index].config;
+  unsigned int cfg = read_step(MODES[mode].steps, index).config;
+
+  // Record progress in case power is lost before the mode finishes cleanly.
+  EEPROM.update(EEPROM_ADDRESS_CYCLE_STEP, index);
 
   controls_set(cfg);           // blocking transitions happen here
   step_start_time = seconds(); // start chrono AFTER transitions
@@ -528,16 +629,10 @@ unsigned int step_set(int index)
   return cfg;
 }
 
-// Initialise a mode run: display the mode name, save the selected
-// mode to EEPROM, compute the total duration, and start step 0.
+// Initialise a mode run: save the selected mode to EEPROM, compute the
+// total duration, and start step 0.
 void run()
 {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd_printf(MODES[mode].name);
-  lcd.setCursor(0, 1);
-  lcd_printf("Preparation");
-
   // Persist the selected mode so it is pre-selected on next power-up
   int saved_mode = EEPROM.read(EEPROM_ADDRESS_MODE);
   if( mode != saved_mode ) {
@@ -545,9 +640,15 @@ void run()
   }
 
   mode_full_time = 0;
-  for(int i=0 ; MODES[mode].steps[i].config != CONFIG_END ; i++ ) {
-    mode_full_time += MODES[mode].steps[i].duration;
+  for(int i=0 ; ; i++ ) {
+    step_t s = read_step(MODES[mode].steps, i);
+    if( s.config == CONFIG_END ) break;
+    mode_full_time += s.duration;
   }
+
+  // Mark a cycle as in-progress. Cleared only by a clean terminate() or
+  // cancel(); if it's still set at the next boot, we restarted mid-cycle.
+  EEPROM.update(EEPROM_ADDRESS_CYCLE_FLAG, 1);
 
   step_set(0);                   // blocking transitions happen here
   mode_start_time = seconds();   // start chrono AFTER first step transitions
@@ -566,9 +667,11 @@ void run_update()
     return;
   }
 
+  step_t cur = read_step(MODES[mode].steps, step);
+
   // Advance to the next step if the current one has expired
   unsigned long step_running_time = seconds() - step_start_time;
-  if( step_running_time >= MODES[mode].steps[step].duration ) {
+  if( step_running_time >= cur.duration ) {
     unsigned int config = step_set( step + 1 );
     if( config == CONFIG_END ) {
       state = STATE_TERMINATE;
@@ -586,11 +689,15 @@ void run_update()
   lcd.setCursor(0, 1);
   lcd_printf(" %lumn%02lu / %lumn%02lu", rtime_mn, rtime_s, ftime_mn, ftime_s);
 
+  // Re-read: `step` may have just advanced above, so this reflects
+  // whichever step is current now, not the one we started this call with.
+  step_t display_step = read_step(MODES[mode].steps, step);
+
   // Blink the top line between the step label and the mode name
   if( mode_running_time % LED_BLINK_PERIOD < LED_BLINK_PERIOD/2 ) {
     digitalWrite(PIN_LED, HIGH);
     lcd.setCursor(0, 0);
-    lcd_printf(resolve_label(MODES[mode].steps[step].config));
+    lcd_printf(resolve_label(display_step.config));
   }
   else {
     digitalWrite(PIN_LED, LOW);
@@ -604,6 +711,9 @@ void run_update()
 void terminate()
 {
   controls_set(0);
+
+  // Clean exit: clear the interrupted-cycle flag.
+  EEPROM.update(EEPROM_ADDRESS_CYCLE_FLAG, 0);
 
   digitalWrite(PIN_LED, LOW);
 
@@ -624,6 +734,9 @@ void cancel()
 {
   controls_set(0);
 
+  // Clean exit (operator-initiated): clear the interrupted-cycle flag.
+  EEPROM.update(EEPROM_ADDRESS_CYCLE_FLAG, 0);
+
   digitalWrite(PIN_LED, LOW);
 
   lcd.setCursor(0, 1);
@@ -633,6 +746,87 @@ void cancel()
   delay(1000);
 
   state = STATE_SELECT;
+}
+
+// ------------------------------------------------------------
+// Interrupted-cycle warning (shown at boot only)
+//
+// If EEPROM_ADDRESS_CYCLE_FLAG is still 1 when setup() runs, the previous
+// cycle never reached terminate() or cancel() — the Arduino restarted
+// mid-run. Surface that instead of silently landing back on the selection
+// screen: without this, an operator has no way to know the keg may still
+// contain caustic mid-cycle. Requires a button press to acknowledge and
+// clear the flag before continuing.
+// ------------------------------------------------------------
+
+// Fixed screen headers, kept in flash (PROGMEM): read only via lcd_printf_P().
+const char MSG_CYCLE_INTERROMPU[] PROGMEM = "CYCLE INTERROMPU";
+const char MSG_CAUSE_PROBABLE[]   PROGMEM = "Cause probable:";
+const char MSG_INTERROMPU_A[]     PROGMEM = "Interrompu %d/%d";
+
+void resume_warning()
+{
+  digitalWrite(PIN_LED, HIGH);
+
+  // Distinct alert pattern: 5 short high beeps, vs. 3 for a normal end
+  // and 1 for an operator cancel.
+  for( int i=0 ; i<5 ; i++ ) {
+    tone(PIN_BUZZER, 2637, 150);
+    delay(300);
+  }
+
+  state = STATE_RESUME_WARNING_UPDATE;
+}
+
+// Returns the number of real steps in a mode's step array (excludes the
+// CONFIG_END sentinel). Used both to bound-check the interrupted-step
+// index read from EEPROM (a fresh, never-written chip reads 0xFF there)
+// and to display the "X/Y" total on the interrupted-cycle screen.
+int count_steps(int mode_index)
+{
+  int i = 0;
+  while( read_step(MODES[mode_index].steps, i).config != CONFIG_END ) i++;
+  return i;
+}
+
+void resume_warning_update()
+{
+  int interrupted_mode = constrain(EEPROM.read(EEPROM_ADDRESS_MODE), 0, MODES_NUMBER - 1);
+  int total_steps = count_steps(interrupted_mode);
+  int interrupted_step = constrain(EEPROM.read(EEPROM_ADDRESS_CYCLE_STEP), 0, total_steps - 1);
+  unsigned int interrupted_config = read_step(MODES[interrupted_mode].steps, interrupted_step).config;
+
+  // Alternate every 2 seconds across three screens (mode/step, cause, and
+  // the action that was actually interrupted), same blink idiom as
+  // run_update(), since they don't all fit on one 16x2 screen at once.
+  switch( (seconds() / 2) % 3 ) {
+    case 1:
+      lcd.setCursor(0, 0);
+      lcd_printf_P(MSG_CYCLE_INTERROMPU);
+      lcd.setCursor(0, 1);
+      lcd_printf(MODES[interrupted_mode].name);
+      break;
+    case 2:
+      lcd.setCursor(0, 0);
+      lcd_printf_P(MSG_CAUSE_PROBABLE);
+      lcd.setCursor(0, 1);
+      lcd_printf_P(reset_cause_label());
+      break;
+    case 0:
+      lcd.setCursor(0, 0);
+      // 1-indexed for the operator (etape 1 of N, not 0 of N)
+      lcd_printf_P(MSG_INTERROMPU_A, interrupted_step + 1, total_steps);
+      lcd.setCursor(0, 1);
+      lcd_printf(resolve_label(interrupted_config));
+      break;
+  }
+
+  buttonAction.update();
+  if( buttonAction.fell() ) {
+    EEPROM.update(EEPROM_ADDRESS_CYCLE_FLAG, 0);
+    digitalWrite(PIN_LED, LOW);
+    state = STATE_SELECT;
+  }
 }
 
 // ============================================================
@@ -682,6 +876,13 @@ void setup()
   // Restore the last selected mode from EEPROM, clamped to valid range
   mode = EEPROM.read(EEPROM_ADDRESS_MODE);
   mode = constrain(mode, 0, MODES_NUMBER - 1);
+
+  // If the cycle-in-progress flag is still set, the previous run never
+  // reached a clean terminate()/cancel() — show the warning instead of
+  // silently starting on the normal selection screen.
+  if( EEPROM.read(EEPROM_ADDRESS_CYCLE_FLAG) != 0 ) {
+    state = STATE_RESUME_WARNING;
+  }
 }
 
 void loop()
@@ -704,6 +905,12 @@ void loop()
       break;
     case STATE_CANCEL:
       cancel();
+      break;
+    case STATE_RESUME_WARNING:
+      resume_warning();
+      break;
+    case STATE_RESUME_WARNING_UPDATE:
+      resume_warning_update();
       break;
   }
 }
