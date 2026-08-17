@@ -4,6 +4,8 @@ Un diagramme par mode. Colonne de gauche « Actionneurs utilisés » (sans bordu
 
 Référence firmware : `MODES[]` dans `kegwasher.ino`.
 
+> Pour la description de chaque mode (cas d'usage, quand l'utiliser), voir le [Manuel d'utilisation](MANUEL_UTILISATION.md).
+
 ## Sommaire
 
 1. [Lavage + CO2](#1--lavage--co2)
@@ -216,7 +218,7 @@ flowchart TD
 
 ## 3 — Détergent seul
 
-Source : `STEPS_DETER_KEG` — ≈ 3 min 05. Pas de cycle désinfection, pas de rinçage final séparé : le cycle de rinçage intermédiaire termine directement le mode.
+Source : `STEPS_DETER_KEG` — ≈ 3 min 00. Pas de cycle désinfection, pas de rinçage final séparé : le cycle de rinçage intermédiaire termine directement le mode.
 
 ```mermaid
 flowchart TD
@@ -288,7 +290,7 @@ flowchart TD
 
 ## 4 — CO2
 
-Source : `STEPS_KEG_PRESSURIZE` — 40 s. Mode le plus court, purement linéaire.
+Source : `STEPS_KEG_PRESSURIZE` — 50 s. Mode le plus court, purement linéaire.
 
 ```mermaid
 flowchart TD
@@ -472,7 +474,7 @@ flowchart TD
     subgraph ACTUATORS["Actionneurs utilisés"]
     direction TD
         A(["Actionneurs<br/>au repos"])
-        B("DESINF_IN&nbsp;+&nbsp;EAU")
+        B("POMPE&nbsp;+&nbsp;DESINF_OUT&nbsp;+&nbsp;EAU")
         E(["Actionneurs<br/>au repos"])
         A ~~~ |&nbsp;| B ~~~ E
     end
@@ -499,7 +501,7 @@ flowchart TD
     subgraph ACTUATORS["Actionneurs utilisés"]
     direction TD
         A(["Actionneurs<br/>au repos"])
-        B("DETERG_IN&nbsp;+&nbsp;EAU")
+        B("POMPE&nbsp;+&nbsp;DETERG_OUT&nbsp;+&nbsp;EAU")
         E(["Actionneurs<br/>au repos"])
         A ~~~ |&nbsp;| B ~~~ E
     end

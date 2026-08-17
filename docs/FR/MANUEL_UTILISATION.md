@@ -35,7 +35,7 @@ Elle dispose de :
 - 1 arrivée de CO₂
 - 1 évacuation vers le caniveau
 
-Un cycle de lavage complet dure environ **5 minutes 35 secondes**.
+Un cycle de lavage complet dure environ **5 minutes 30 secondes**.
 
 ---
 
@@ -90,9 +90,11 @@ Le **buzzer** émet :
 
 ## 5. Description des modes
 
+> Pour les diagrammes de séquences de chaque mode (quels actionneurs sont actifs à chaque étape), voir les [Diagrammes de séquences (GRAFCET)](GRAFCET_TOUS_MODES.md).
+
 ### Modes de lavage complets
 
-#### `Lavage + CO2` — 335 s (5 min 35)
+#### `Lavage + CO2` — 330 s (5 min 30)
 Mode de lavage complet recommandé pour un fût ayant contenu de la bière.
 
 | Phase | Durée | Description |
@@ -109,14 +111,14 @@ Mode de lavage complet recommandé pour un fût ayant contenu de la bière.
 
 ---
 
-#### `Lavage sans CO2` — 325 s (5 min 25)
+#### `Lavage sans CO2` — 320 s (5 min 20)
 Identique au mode précédent mais sans l'étape de pressurisation finale au CO₂. La purge finale est à l'air comprimé.
 
 À utiliser si la mise sous pression CO₂ est faite séparément, ou si le fût n'est pas rempli immédiatement.
 
 ---
 
-#### `Detergent seul` — 185 s (3 min 05)
+#### `Detergent seul` — 180 s (3 min 00)
 Lavage au détergent et rinçages uniquement, sans étape de désinfection ni CO₂.
 
 À utiliser pour un nettoyage rapide entre deux utilisations rapprochées, ou quand la désinfection sera faite dans un second temps.
@@ -132,7 +134,7 @@ Désinfection seule suivie d'une purge CO₂ et d'une pressurisation.
 
 ---
 
-#### `CO2` — 40 s
+#### `CO2` — 50 s
 Purge CO₂ + pressurisation uniquement, sans produit chimique.
 
 À utiliser pour re-pressuriser un fût propre qui a été laissé ouvert, ou pour chasser l'air résiduel.
@@ -163,14 +165,14 @@ Vidange de la **cuve détergent** à travers le circuit vers le caniveau via la 
 ---
 
 #### `Rempl. desinf.` — 120 s (2 min 00)
-Remplissage de la **cuve désinfectant** avec de l'eau du réseau via l'électrovanne d'entrée. Le remplissage se fait par pression du réseau uniquement — la pompe n'est pas utilisée.
+Remplissage de la **cuve désinfectant** avec de l'eau du réseau. L'eau entre dans le fût via l'arrivée d'eau, puis est pompée vers la cuve désinfectant via la vanne de retour (`SANITIZER_OUT`).
 
-> ⚠️ S'assurer que la cuve est vide ou à un niveau permettant d'accueillir le volume d'eau avant de lancer ce mode. La vitesse de remplissage dépend entièrement de la pression du réseau.
+> ⚠️ S'assurer que la cuve est vide ou à un niveau permettant d'accueillir le volume d'eau avant de lancer ce mode.
 
 ---
 
 #### `Rempl. deter.` — 120 s (2 min 00)
-Remplissage de la **cuve détergent** avec de l'eau du réseau.
+Remplissage de la **cuve détergent** avec de l'eau du réseau. L'eau entre dans le fût via l'arrivée d'eau, puis est pompée vers la cuve détergent via la vanne de retour (`CLEANER_OUT`).
 
 > ⚠️ Même précaution que pour le remplissage désinfectant. Penser à ajouter la soude après le remplissage.
 
@@ -178,10 +180,10 @@ Remplissage de la **cuve détergent** avec de l'eau du réseau.
 
 ### Mode de test
 
-#### `Test vannes` — 22 s
+#### `Test vannes` — 24 s
 Active chaque actionneur **individuellement** pendant 1 seconde, dans l'ordre physique des relais (de gauche à droite et de haut en bas sur la carte).
 
-> ⚠️ **Les cuves doivent être vides avant de lancer ce mode.** L'écran affiche `Cuves vides ?` pendant 3 secondes au démarrage. Attendre ce message et vérifier avant que le test ne commence.
+> ⚠️ **Les cuves doivent être vides avant de lancer ce mode.** L'écran affiche `Cuves vides ?` pendant 5 secondes au démarrage. Attendre ce message et vérifier avant que le test ne commence.
 
 À utiliser pour vérifier le câblage, diagnostiquer une électrovanne silencieuse ou confirmer que la machine est correctement assemblée.
 

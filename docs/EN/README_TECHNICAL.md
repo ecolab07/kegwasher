@@ -285,10 +285,10 @@ Both bits are outside the 9-bit range of real actuator bits, so they cannot acci
 
 | Mode | Array | Duration | Gummy35 | Ecolab07 |
 |---|---|---|---|---|
-| `Lavage + CO2` | `STEPS_WASH_KEG_PRESSURIZE` | 335 s | ✅ CO₂ step | |
-| `Lavage sans CO2` | `STEPS_WASH_KEG` | 325 s | | |
-| `Detergent seul` | `STEPS_DETER_KEG` | 185 s | ✅ added | |
-| `CO2` | `STEPS_KEG_PRESSURIZE` | 40 s | ✅ added | |
+| `Lavage + CO2` | `STEPS_WASH_KEG_PRESSURIZE` | 330 s | ✅ CO₂ step | |
+| `Lavage sans CO2` | `STEPS_WASH_KEG` | 320 s | | |
+| `Detergent seul` | `STEPS_DETER_KEG` | 180 s | ✅ added | |
+| `CO2` | `STEPS_KEG_PRESSURIZE` | 50 s | ✅ added | |
 | `Desinf. + CO2` | `STEPS_SANITIZE_KEG_PRESSURIZE` | 190 s | ✅ added | |
 | `Vidange fut` | `STEPS_DRAIN_KEG` | 70 s | | |
 | `Vidange desinf.` | `STEPS_DRAIN_SANITIZER` | 200 s | | |

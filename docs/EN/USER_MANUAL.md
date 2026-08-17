@@ -35,7 +35,7 @@ It is equipped with:
 - 1 CO₂ inlet
 - 1 drain outlet
 
-A full wash cycle takes approximately **5 minutes 35 seconds**.
+A full wash cycle takes approximately **5 minutes 30 seconds**.
 
 ---
 
@@ -90,9 +90,11 @@ The **buzzer** sounds:
 
 ## 5. Mode descriptions
 
+> For the actuator sequence diagrams of each mode (which valves are active at each step), see the [Mode sequence diagrams (GRAFCET)](GRAFCET_ALL_MODES.md).
+
 ### Full wash modes
 
-#### `Lavage + CO2` — 335 s (5 min 35)
+#### `Lavage + CO2` — 330 s (5 min 30)
 Full wash cycle. Recommended for kegs that have contained beer.
 
 | Phase | Duration | Description |
@@ -109,14 +111,14 @@ Full wash cycle. Recommended for kegs that have contained beer.
 
 ---
 
-#### `Lavage sans CO2` — 325 s (5 min 25)
+#### `Lavage sans CO2` — 320 s (5 min 20)
 Same as the above but without the final CO₂ pressurisation step. The final purge uses compressed air.
 
 Use this mode if CO₂ pressurisation is done separately, or if the keg will not be filled immediately.
 
 ---
 
-#### `Detergent seul` — 185 s (3 min 05)
+#### `Detergent seul` — 180 s (3 min 00)
 Detergent wash and rinses only — no sanitization, no CO₂.
 
 Use for a quick clean between two closely-spaced uses, or when sanitization will be done in a separate step.
@@ -132,7 +134,7 @@ Use on a keg that **has already been washed with detergent** in a previous sessi
 
 ---
 
-#### `CO2` — 40 s
+#### `CO2` — 50 s
 CO₂ purge and pressurisation only — no chemicals.
 
 Use to re-pressurise a clean keg that has been left open, or to displace residual air.
@@ -163,14 +165,14 @@ Use to renew the detergent solution or at the end of the season.
 ---
 
 #### `Rempl. desinf.` — 120 s (2 min 00)
-Fills the **sanitizer tank** with mains water via the inlet solenoid valve. Filling is driven by mains water pressure only — the pump is not used.
+Fills the **sanitizer tank** with mains water. Water enters the keg via the water inlet, then is pumped back into the sanitizer tank through the return valve (`SANITIZER_OUT`).
 
-> ⚠️ Make sure the tank is empty or has enough capacity before starting this mode. Fill speed depends entirely on your mains water pressure.
+> ⚠️ Make sure the tank is empty or has enough capacity before starting this mode.
 
 ---
 
 #### `Rempl. deter.` — 120 s (2 min 00)
-Fills the **detergent tank** with mains water. Filling is driven by mains water pressure only — the pump is not used.
+Fills the **detergent tank** with mains water. Water enters the keg via the water inlet, then is pumped back into the detergent tank through the return valve (`CLEANER_OUT`).
 
 > ⚠️ Same precaution as for sanitizer refilling. Remember to add caustic soda after filling.
 
@@ -178,10 +180,10 @@ Fills the **detergent tank** with mains water. Filling is driven by mains water 
 
 ### Test mode
 
-#### `Test vannes` — 22 s
+#### `Test vannes` — 24 s
 Activates each actuator **individually** for 1 second, in the physical order of the relay board (left to right, top to bottom).
 
-> ⚠️ **All tanks must be empty before running this mode.** The screen displays `Cuves vides ?` for 3 seconds at the start. Wait for this prompt and confirm before the test begins.
+> ⚠️ **All tanks must be empty before running this mode.** The screen displays `Cuves vides ?` for 5 seconds at the start. Wait for this prompt and confirm before the test begins.
 
 Use to verify wiring, diagnose a silent solenoid valve, or confirm correct assembly after build or repair.
 
